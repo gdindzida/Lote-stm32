@@ -4,7 +4,7 @@ project(Lote-stm32 C CXX ASM)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(MCU_FLAGS
 -mcpu=cortex-m4
 -mthumb
@@ -29,11 +29,11 @@ ${MCU_FLAGS}
 )
 
 include_directories(
-modules/libopencm3/include
+../modules/libopencm3/include
 )
 
 link_directories(
-modules/libopencm3/lib
+../modules/libopencm3/lib
 )
 
 add_executable(firmware.elf

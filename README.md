@@ -1,7 +1,9 @@
 # Lote-stm32
 learn on the edge - stm32g431cbu6 open source hil
 
-## Install dependencies
+## Setup repository 
+Install following vscode extensions: clangd, pylance, c/c++
+Add to include path in workspace vscode settings: ${workspaceFolder}/modules/libopencm3/include/**
 
 ```
 sudo apt install gcc-arm-none-eabi cmake ninja-build dfu-util clangd git
@@ -11,6 +13,18 @@ sudo apt install gcc-arm-none-eabi cmake ninja-build dfu-util clangd git
 git submodule update --init --recursive
 cd firmware/modules/libopencm3
 make TARGETS=stm32/g4
+cd ../gaspar
+./setup_requirements.sh
+cd ../..
+```
+
+To run gaspar it is necessary to activate venv
+```
+source venv/bin/activate
+```
+To deactivete
+```
+deactivate
 ```
 
 ## Build

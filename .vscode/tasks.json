@@ -1,0 +1,74 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Lote-stm32: cmake configure",
+            "type": "shell",
+            "command": "cmake -B build-debug -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi-toolchain.cmake",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware/"
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Lote-stm32: build",
+            "type": "shell",
+            "command": "cmake --build build-debug",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": {
+                "owner": "gcc",
+                "fileLocation": [
+                    "relative",
+                    "${workspaceFolder}/firmware"
+                ],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            },
+            "dependsOn": "Lote-stm32: cmake configure"
+        },
+        {
+            "label": "Lote-stm32: flash",
+            "type": "shell",
+            "command": "../tools/flash.sh",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "dependsOn": "build"
+        },
+        {
+            "label": "Lote-stm32: clean",
+            "type": "shell",
+            "command": "rm -rf build*",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware"
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Lote-stm32: size",
+            "type": "shell",
+            "command": "arm-none-eabi-size build-debug/firmware.elf",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware"
+            },
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}
