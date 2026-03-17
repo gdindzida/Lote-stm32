@@ -42,8 +42,6 @@ void initialise_monitor_handles() {}
 
 int _getpid(void) { return 1; }
 
-void _init(void) {}
-
 int _kill(int pid, int sig) {
   (void)pid;
   (void)sig;

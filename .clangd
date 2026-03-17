@@ -1,0 +1,28 @@
+CompileFlags:
+  CompilationDatabase: firmware/build-debug
+  Add:
+    - "--sysroot=/usr"
+    - "-isystem/usr/include/newlib/c++/13.2.1"
+    - "-isystem/usr/include/newlib/c++/13.2.1/arm-none-eabi"
+    - "-isystem/usr/include/newlib"
+    - "-isystem/usr/include/newlib/arm-none-eabi"
+  Remove:
+    - "-W*"
+InlayHints:
+  Enabled: No
+Diagnostics:
+  ClangTidy:
+    Add:
+      - modernize-*
+      - bugprone-*
+      - performance-*
+      - readability-*
+      - cert-*
+      - misc-*
+    Remove:
+      - modernize-use-trailing-return-type
+      - modernize-use-std-numbers
+      - performance-move-const-arg
+      - performance-unnecessary-copy-initialization
+      - bugprone-easily-swappable-parameters
+      - readability-magic-numbers
