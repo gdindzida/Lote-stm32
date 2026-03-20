@@ -1,109 +1,116 @@
-/* USER CODE BEGIN Header */
-/**
- ******************************************************************************
- * @file           : main.c
- * @brief          : Main program body
- ******************************************************************************
- * @attention
- *
- * Copyright (c) 2026 STMicroelectronics.
- * All rights reserved.
- *
- * This software is licensed under terms that can be found in the LICENSE file
- * in the root directory of this software component.
- * If no LICENSE file comes with this software, it is provided AS-IS.
- *
- ******************************************************************************
- */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "dma.h"
 #include "gpio.h"
+#include "image.h"
+#include "stm32g4xx_hal.h"
+#include "string.h"
 #include "usb_device.h"
+#include "usbd_cdc_if.h"
+#include <stdint.h>
+#include <stdlib.h>
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-
-/* USER CODE BEGIN PV */
-
-/* USER CODE END PV */
-
-/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-/* USER CODE BEGIN PFP */
 
-/* USER CODE END PFP */
+volatile McuState currentState = {WAITING_INPUT};
 
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
+void process_data(PacketHeader *header, Metadata *metadata,
+                  Coordinate *coordinates) {
+  metadata->elapsed_time_ms = (DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000));
 
-/* USER CODE END 0 */
+  header->magic = MAGIC;
+  header->length = 0;
+
+  uint32_t currentRxBufferOffset = rxBufferOffset + APP_RX_BUFFER_SIZE;
+  currentRxBufferOffset %= APP_RX_DATA_SIZE;
+  uint8_t *bufferView = UserRxBufferFS + currentRxBufferOffset;
+
+  uint32_t sum = 0;
+  for (int i = 0; i < APP_RX_BUFFER_SIZE; i++) {
+    sum += bufferView[i];
+  }
+
+  metadata->sum = sum;
+
+  if (sum % 2 == 0) {
+    header->length = sizeof(Metadata) + sizeof(Coordinate);
+    metadata->num_points = 1;
+    coordinates->x = 17;
+    coordinates->y = 43;
+  } else {
+    header->length = sizeof(Metadata);
+    metadata->num_points = 0;
+  }
+
+  metadata->elapsed_time_ms =
+      (DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000)) -
+      metadata->elapsed_time_ms;
+}
+
+void DWT_Init(void) {
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
 
 /**
  * @brief  The application entry point.
  * @retval int
  */
 int main(void) {
-
-  /* USER CODE BEGIN 1 */
-
-  /* USER CODE END 1 */
-
-  /* MCU Configuration--------------------------------------------------------*/
-
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick.
-   */
   HAL_Init();
-
-  /* USER CODE BEGIN Init */
-
-  /* USER CODE END Init */
-
-  /* Configure the system clock */
   SystemClock_Config();
-
-  /* USER CODE BEGIN SysInit */
-
-  /* USER CODE END SysInit */
-
-  /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_USB_Device_Init();
-  /* USER CODE BEGIN 2 */
+  DWT_Init();
 
-  /* USER CODE END 2 */
+  // const char hello_msg[] = "Hello, World!\r\n";
+  // const char receive_msg[] = "Received a message!\r\n";
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
+  // while (1) {
+  //   __disable_irq();
+  //   McuState snapshot = currentState;
+  //   if (snapshot == SENDING) {
+  //     currentState = WAITING_OUT_HELLO;
+  //   } else if (snapshot == RECEIVED) {
+  //     currentState = WAITING_OUT_RECV;
+  //   }
+  //   __enable_irq();
+
+  //   if (snapshot == SENDING) {
+  //     // currentState = WAITING_OUT_HELLO;
+  //     CDC_Transmit_FS((uint8_t *)hello_msg, strlen(hello_msg));
+  //   } else if (snapshot == RECEIVED) {
+  //     // currentState = WAITING_OUT_RECV;
+  //     CDC_Transmit_FS((uint8_t *)receive_msg, strlen(receive_msg));
+  //   }
+  // }
+
+  PacketHeader header = {};
+  Payload payload = {};
+
   while (1) {
-    /* USER CODE END WHILE */
+    __disable_irq();
+    McuState snapshot = currentState;
+    if (snapshot == PROCESS_DATA) {
+      currentState = SEND_HEADER;
+    } else if (snapshot == SEND_HEADER) {
+      currentState = WAITING_OUT_HEADER;
+    } else if (snapshot == SEND_DATA) {
+      currentState = WAITING_OUT_DATA;
+    }
+    __enable_irq();
 
-    /* USER CODE BEGIN 3 */
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
-    HAL_Delay(500);
+    if (snapshot == PROCESS_DATA) {
+      process_data(&header, &payload.metadata, payload.coordinates);
+    } else if (snapshot == SEND_HEADER) {
+      CDC_Transmit_FS((uint8_t *)&header, sizeof(PacketHeader));
+    } else if (snapshot == SEND_DATA) {
+      uint16_t length =
+          sizeof(Metadata) + (sizeof(Coordinate) * payload.metadata.num_points);
+      CDC_Transmit_FS((uint8_t *)&payload, length);
+    }
   }
-  /* USER CODE END 3 */
 }
 
 /**
@@ -149,21 +156,15 @@ void SystemClock_Config(void) {
   }
 }
 
-/* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
-
 /**
  * @brief  This function is executed in case of error occurrence.
  * @retval None
  */
 void Error_Handler(void) {
-  /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1) {
   }
-  /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
 /**
@@ -174,10 +175,8 @@ void Error_Handler(void) {
  * @retval None
  */
 void assert_failed(uint8_t *file, uint32_t line) {
-  /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line
      number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,
      line) */
-  /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

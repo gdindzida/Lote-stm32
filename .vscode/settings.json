@@ -1,5 +1,6 @@
 {
     "clangd.arguments": [
         "--compile-commands-dir=${workspaceFolder}/firmware/build-debug"
-    ]
+    ],
+    "python-envs.pythonProjects": []
 }
