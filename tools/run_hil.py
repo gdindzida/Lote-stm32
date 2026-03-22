@@ -17,7 +17,7 @@ from typing import List
 
 MAGIC = 0xABCD
 HEADER_FMT = "<HH"
-METADATA_FMT = "<IIH"
+METADATA_FMT = "<IIHf"
 COORD_FMT = "BB"
 
 
@@ -26,6 +26,7 @@ class Metadata:
     process_elapsed_time_ms: int
     sum: int
     num_points: int
+    stack_mem_usage: float
 
 
 @dataclass
@@ -60,6 +61,7 @@ if __name__ == "__main__":
 
     elapsed_times: List[float] = []
     process_elapsed_times: List[float] = []
+    peak_memory = 0
 
     print("Starting KITTI clip playback...")
     while streamer.has_next():
@@ -114,9 +116,11 @@ if __name__ == "__main__":
 
         elapsed_times.append(elapsed_time)
         process_elapsed_times.append(meta.process_elapsed_time_ms)
+        peak_memory = meta.stack_mem_usage
 
         print("Got sum= ", meta.sum, " for real sum= ", sum(img_data))
         print("Got process elprocess elapsed time(us)= ", meta.process_elapsed_time_ms)
+        print("Peak stack mem= ", 100 * meta.stack_mem_usage, "%")
         if meta.num_points > 0:
             coord_size = struct.calcsize(COORD_FMT)
             offset = meta_size
@@ -129,7 +133,7 @@ if __name__ == "__main__":
 
         cv2.imshow("Left", left_img)
         cv2.imshow("Small left", small_img)
-        key = cv2.waitKey(10)
+        key = cv2.waitKey(1000)
         if key == ord("q"):  # press Q to quit
             break
 
@@ -158,6 +162,9 @@ if __name__ == "__main__":
     print("min process elapsed time(ms): ", min_process_elapsed_time)
     print("avg process elapsed time(ms): ", avg_process_elapsed_time)
     print("std process elapsed time(ms): ", std_process_elapsed_time)
+
+    print("")
+    print("Peak stack memory: ", 100 * peak_memory, "%")
 
     # streamer.run()
     cv2.destroyAllWindows()

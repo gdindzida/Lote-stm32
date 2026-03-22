@@ -33,6 +33,7 @@ typedef struct __attribute__((packed)) {
   uint32_t elapsed_time_ms;
   uint32_t sum;
   uint16_t num_points;
+  float stack_mem_usage;
 } Metadata;
 
 typedef struct __attribute__((packed)) {
