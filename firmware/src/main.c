@@ -1,96 +1,18 @@
 #include "main.h"
+#include "data_processor.h"
 #include "dma.h"
+#include "dwt.h"
 #include "gpio.h"
-#include "image.h"
+#include "stack_monitor.h"
 #include "stm32g4xx_hal.h"
-#include "string.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
-#include <stdint.h>
-#include <stdlib.h>
 
-#define STACK_PAINT_VALUE 0xDEADBEEFU
-
-// NOLINTNEXTLINE
-extern uint32_t _sstack;
-// NOLINTNEXTLINE
-extern uint32_t _estack;
-
-void stack_paint(void) __attribute__((naked, section(".text.startup")));
-void stack_paint(void) {
-  __asm volatile("ldr r0, =_sstack          \n"
-                 "ldr r1, =0xDEADBEEF       \n"
-                 "mov r2, sp                \n"
-                 "paint_loop:               \n"
-                 "cmp r0, r2                \n"
-                 "bge paint_done            \n"
-                 "str r1, [r0], #4          \n"
-                 "b   paint_loop            \n"
-                 "paint_done:               \n"
-                 "bx  lr                    \n");
-}
-
-float stack_get_peak_usage(void) {
-  uint32_t *p = &_sstack;
-
-  while (*p == STACK_PAINT_VALUE && p < &_estack) {
-    p++;
-  }
-
-  uint32_t total = (uint32_t)(&_estack - &_sstack) * sizeof(uint32_t);
-  uint32_t peak = (uint32_t)(&_estack - p) * sizeof(uint32_t);
-
-  return ((float)peak) / ((float)total);
-}
-
-uint32_t stack_get_total_size(void) {
-  return (uint32_t)(&_estack - &_sstack) * sizeof(uint32_t);
-}
 
 // Other
 void SystemClock_Config(void);
 
 volatile McuState currentState = {WAITING_INPUT};
-
-void process_data(PacketHeader *header, Metadata *metadata,
-                  Coordinate *coordinates) {
-  metadata->elapsed_time_ms = (DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000));
-
-  header->magic = MAGIC;
-  header->length = 0;
-
-  uint32_t currentRxBufferOffset = rxBufferOffset + APP_RX_BUFFER_SIZE;
-  currentRxBufferOffset %= APP_RX_DATA_SIZE;
-  uint8_t *bufferView = UserRxBufferFS + currentRxBufferOffset;
-
-  uint32_t sum = 0;
-  for (int i = 0; i < APP_RX_BUFFER_SIZE; i++) {
-    sum += bufferView[i];
-  }
-
-  metadata->sum = sum;
-
-  if (sum % 2 == 0) {
-    header->length = sizeof(Metadata) + sizeof(Coordinate);
-    metadata->num_points = 1;
-    coordinates->x = 17;
-    coordinates->y = 43;
-  } else {
-    header->length = sizeof(Metadata);
-    metadata->num_points = 0;
-  }
-
-  metadata->elapsed_time_ms =
-      (DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000)) -
-      metadata->elapsed_time_ms;
-  metadata->stack_mem_usage = stack_get_peak_usage();
-}
-
-void DWT_Init(void) {
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0;
-  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
 
 /**
  * @brief  The application entry point.
@@ -104,28 +26,6 @@ int main(void) {
   MX_DMA_Init();
   MX_USB_Device_Init();
   DWT_Init();
-
-  // const char hello_msg[] = "Hello, World!\r\n";
-  // const char receive_msg[] = "Received a message!\r\n";
-
-  // while (1) {
-  //   __disable_irq();
-  //   McuState snapshot = currentState;
-  //   if (snapshot == SENDING) {
-  //     currentState = WAITING_OUT_HELLO;
-  //   } else if (snapshot == RECEIVED) {
-  //     currentState = WAITING_OUT_RECV;
-  //   }
-  //   __enable_irq();
-
-  //   if (snapshot == SENDING) {
-  //     // currentState = WAITING_OUT_HELLO;
-  //     CDC_Transmit_FS((uint8_t *)hello_msg, strlen(hello_msg));
-  //   } else if (snapshot == RECEIVED) {
-  //     // currentState = WAITING_OUT_RECV;
-  //     CDC_Transmit_FS((uint8_t *)receive_msg, strlen(receive_msg));
-  //   }
-  // }
 
   PacketHeader header = {};
   Payload payload = {};
@@ -202,11 +102,11 @@ void SystemClock_Config(void) {
  * @retval None
  */
 void Error_Handler(void) {
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1) {
   }
 }
+
 #ifdef USE_FULL_ASSERT
 /**
  * @brief  Reports the name of the source file and the source line number

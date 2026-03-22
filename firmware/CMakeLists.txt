@@ -59,6 +59,9 @@ include_directories(
 # Application sources
 set(APP_SOURCES
     src/main.c
+    src/data_processor.cpp
+    src/stack_monitor.c
+    src/dwt.c
     src/dma.c
     src/gpio.c
     src/usb_device.c

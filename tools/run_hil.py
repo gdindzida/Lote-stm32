@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
         print("Got sum= ", meta.sum, " for real sum= ", sum(img_data))
         print("Got process elprocess elapsed time(us)= ", meta.process_elapsed_time_ms)
-        print("Peak stack mem= ", 100 * meta.stack_mem_usage, "%")
+        print("Peak stack mem usage= ", 100 * meta.stack_mem_usage, "%")
         if meta.num_points > 0:
             coord_size = struct.calcsize(COORD_FMT)
             offset = meta_size
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     print("std process elapsed time(ms): ", std_process_elapsed_time)
 
     print("")
-    print("Peak stack memory: ", 100 * peak_memory, "%")
+    print("Peak stack memory usage: ", 100 * peak_memory, "%")
 
     # streamer.run()
     cv2.destroyAllWindows()
