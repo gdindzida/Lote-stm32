@@ -17,7 +17,7 @@ from typing import List
 
 MAGIC = 0xABCD
 HEADER_FMT = "<HH"
-METADATA_FMT = "<IIHf"
+METADATA_FMT = "<IIHff"
 COORD_FMT = "BB"
 
 
@@ -27,6 +27,7 @@ class Metadata:
     sum: int
     num_points: int
     stack_mem_usage: float
+    heap_mem_usage: float
 
 
 @dataclass
@@ -61,7 +62,8 @@ if __name__ == "__main__":
 
     elapsed_times: List[float] = []
     process_elapsed_times: List[float] = []
-    peak_memory = 0
+    peak_stack_memory = 0
+    peak_heap_memory = 0
 
     print("Starting KITTI clip playback...")
     while streamer.has_next():
@@ -103,7 +105,7 @@ if __name__ == "__main__":
         if magic != MAGIC:
             raise ValueError(f"Bad magic: {hex(magic)}")
 
-        # print("Waiting for payload")
+        # print("Waiting for payload= ", length, " bytes")
         payload = ser.read(length)
         # time.sleep(1)
 
@@ -116,24 +118,50 @@ if __name__ == "__main__":
 
         elapsed_times.append(elapsed_time)
         process_elapsed_times.append(meta.process_elapsed_time_ms)
-        peak_memory = meta.stack_mem_usage
+        peak_stack_memory = meta.stack_mem_usage
+        peak_heap_memory = meta.heap_mem_usage
 
         print("Got sum= ", meta.sum, " for real sum= ", sum(img_data))
-        print("Got process elprocess elapsed time(us)= ", meta.process_elapsed_time_ms)
+        print("Got process process elapsed time(us)= ", meta.process_elapsed_time_ms)
         print("Peak stack mem usage= ", 100 * meta.stack_mem_usage, "%")
+        print("Peak stack mem usage= ", 100 * meta.heap_mem_usage, "%")
+        small_annotated = cv2.cvtColor(small_img.copy(), cv2.COLOR_GRAY2BGR)
+        big_annotated = cv2.cvtColor(left_img.copy(), cv2.COLOR_GRAY2BGR)
+
+        scale_x = left_img.shape[1] / 128.0
+        scale_y = left_img.shape[0] / 64.0
+
         if meta.num_points > 0:
             coord_size = struct.calcsize(COORD_FMT)
             offset = meta_size
-            x, y = struct.unpack(COORD_FMT, payload[offset : offset + coord_size])
-
             print("Got this many points: ", meta.num_points)
-            print("x= ", x, " y= ", y)
+            for i in range(meta.num_points):
+                x, y = struct.unpack(COORD_FMT, payload[offset : offset + coord_size])
+                offset += coord_size
+                x, y = int(x) & 0xFF, int(y) & 0xFF  # interpret as uint8_t (0–255)
+                print(f"  point[{i}]: x={y}, y={x}")
+
+                # Draw on small image (coordinates are in small image space)
+                cv2.circle(
+                    small_annotated, (y, x), radius=2, color=(0, 255, 0), thickness=-1
+                )
+
+                # Scale up and draw on big image
+                big_x = int(x * scale_y)
+                big_y = int(y * scale_x)
+                cv2.circle(
+                    big_annotated,
+                    (big_y, big_x),
+                    radius=5,
+                    color=(0, 255, 0),
+                    thickness=-1,
+                )
         else:
             print("No points!")
 
-        cv2.imshow("Left", left_img)
-        cv2.imshow("Small left", small_img)
-        key = cv2.waitKey(1000)
+        cv2.imshow("Left", big_annotated)
+        cv2.imshow("Small left", small_annotated)
+        key = cv2.waitKey(1)
         if key == ord("q"):  # press Q to quit
             break
 
@@ -145,9 +173,15 @@ if __name__ == "__main__":
     print("")
     print("Statistics")
     print("")
-    print("max elapsed time(ms): ", max_elapsed_time)
-    print("min elapsed time(ms): ", min_elapsed_time)
-    print("avg elapsed time(ms): ", avg_elapsed_time)
+    print(
+        "max elapsed time(ms): ", max_elapsed_time, " f(Hz)= ", 1000 / max_elapsed_time
+    )
+    print(
+        "min elapsed time(ms): ", min_elapsed_time, " f(Hz)= ", 1000 / min_elapsed_time
+    )
+    print(
+        "avg elapsed time(ms): ", avg_elapsed_time, " f(Hz)= ", 1000 / avg_elapsed_time
+    )
     print("std elapsed time(ms): ", std_elapsed_time)
 
     max_process_elapsed_time = 0.001 * max(process_elapsed_times)
@@ -164,7 +198,8 @@ if __name__ == "__main__":
     print("std process elapsed time(ms): ", std_process_elapsed_time)
 
     print("")
-    print("Peak stack memory usage: ", 100 * peak_memory, "%")
+    print("Peak stack memory usage: ", 100 * peak_stack_memory, "%")
+    print("Peak heap memory usage: ", 100 * peak_heap_memory, "%")
 
     # streamer.run()
     cv2.destroyAllWindows()

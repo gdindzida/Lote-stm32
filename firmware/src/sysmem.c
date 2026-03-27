@@ -21,6 +21,7 @@
  */
 
 /* Includes */
+#include "sysmem.h"
 #include <errno.h>
 #include <stdint.h>
 
@@ -28,6 +29,7 @@
  * Pointer to the current high watermark of the heap usage
  */
 static uint8_t *__sbrk_heap_end = NULL;
+static uint8_t *__sbrk_heap_peak = NULL;
 
 /**
  * @brief _sbrk() allocates memory to the newlib heap and is used by malloc
@@ -61,6 +63,7 @@ void *_sbrk(ptrdiff_t incr) {
   /* Initialize heap end at first call */
   if (NULL == __sbrk_heap_end) {
     __sbrk_heap_end = &_end;
+    __sbrk_heap_peak = &_end;
   }
 
   /* Protect heap from growing into the reserved MSP stack */
@@ -72,5 +75,23 @@ void *_sbrk(ptrdiff_t incr) {
   prev_heap_end = __sbrk_heap_end;
   __sbrk_heap_end += incr;
 
+  if (__sbrk_heap_end > __sbrk_heap_peak) {
+    __sbrk_heap_peak = __sbrk_heap_end;
+  }
+
   return (void *)prev_heap_end;
+}
+
+uint32_t Heap_GetPeakUsage(void) {
+  extern uint8_t _end;
+  if (__sbrk_heap_peak == NULL)
+    return 0;
+  return (uint32_t)(__sbrk_heap_peak - &_end);
+}
+
+uint32_t Heap_GetCurrentUsage(void) {
+  extern uint8_t _end;
+  if (__sbrk_heap_end == NULL)
+    return 0;
+  return (uint32_t)(__sbrk_heap_end - &_end);
 }

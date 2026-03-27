@@ -7,6 +7,12 @@
 extern "C" {
 #endif
 
+struct Corner {
+  uint8_t row;
+  uint8_t col;
+  uint32_t score;
+};
+
 void process_data(PacketHeader *header, Metadata *metadata,
                   Coordinate *coordinates);
 

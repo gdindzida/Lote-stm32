@@ -1,4 +1,5 @@
 #include "main.h"
+#include "app_types.h"
 #include "data_processor.h"
 #include "dma.h"
 #include "dwt.h"
@@ -7,7 +8,6 @@
 #include "stm32g4xx_hal.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
-
 
 // Other
 void SystemClock_Config(void);
@@ -27,28 +27,27 @@ int main(void) {
   MX_USB_Device_Init();
   DWT_Init();
 
-  PacketHeader header = {};
   Payload payload = {};
 
   while (1) {
     __disable_irq();
     McuState snapshot = currentState;
     if (snapshot == PROCESS_DATA) {
-      currentState = SEND_HEADER;
-    } else if (snapshot == SEND_HEADER) {
-      currentState = WAITING_OUT_HEADER;
+      currentState = SEND_DATA;
+      // } else if (snapshot == SEND_HEADER) {
+      //   currentState = WAITING_OUT_HEADER;
     } else if (snapshot == SEND_DATA) {
       currentState = WAITING_OUT_DATA;
     }
     __enable_irq();
 
     if (snapshot == PROCESS_DATA) {
-      process_data(&header, &payload.metadata, payload.coordinates);
-    } else if (snapshot == SEND_HEADER) {
-      CDC_Transmit_FS((uint8_t *)&header, sizeof(PacketHeader));
+      process_data(&payload.header, &payload.metadata, payload.coordinates);
+      // } else if (snapshot == SEND_HEADER) {
+      //   CDC_Transmit_FS((uint8_t *)&header, sizeof(PacketHeader));
     } else if (snapshot == SEND_DATA) {
-      uint16_t length =
-          sizeof(Metadata) + (sizeof(Coordinate) * payload.metadata.num_points);
+      uint16_t length = sizeof(PacketHeader) + sizeof(Metadata) +
+                        (sizeof(Coordinate) * payload.metadata.num_points);
       CDC_Transmit_FS((uint8_t *)&payload, length);
     }
   }

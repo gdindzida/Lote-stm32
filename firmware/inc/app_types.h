@@ -17,15 +17,15 @@ extern "C" {
 typedef enum {
   WAITING_INPUT,
   PROCESS_DATA,
-  SEND_HEADER,
-  WAITING_OUT_HEADER,
+  // SEND_HEADER,
+  // WAITING_OUT_HEADER,
   SEND_DATA,
   WAITING_OUT_DATA,
 } McuState;
 
 typedef struct __attribute__((packed)) {
-  uint8_t x;
-  uint8_t y;
+  uint8_t row;
+  uint8_t col;
 } Coordinate;
 
 typedef struct __attribute__((packed)) {
@@ -33,17 +33,18 @@ typedef struct __attribute__((packed)) {
   uint32_t sum;
   uint16_t num_points;
   float stack_mem_usage;
+  float heap_mem_usage;
 } Metadata;
-
-typedef struct __attribute__((packed)) {
-  Metadata metadata;
-  Coordinate coordinates[100];
-} Payload;
-
 typedef struct __attribute__((packed)) {
   uint16_t magic;
   uint16_t length;
 } PacketHeader;
+
+typedef struct __attribute__((packed)) {
+  PacketHeader header;
+  Metadata metadata;
+  Coordinate coordinates[32];
+} Payload;
 
 #ifdef __cplusplus
 }

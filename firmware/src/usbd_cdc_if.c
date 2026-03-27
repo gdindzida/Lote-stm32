@@ -179,9 +179,10 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum) {
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
-  if (currentState == WAITING_OUT_HEADER) {
-    currentState = SEND_DATA;
-  } else if (currentState == WAITING_OUT_DATA) {
+  // if (currentState == WAITING_OUT_HEADER) {
+  //   currentState = SEND_DATA;
+  // }
+  if (currentState == WAITING_OUT_DATA) {
     currentState = WAITING_INPUT;
   }
   return result;
