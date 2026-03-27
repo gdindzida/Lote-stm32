@@ -1,7 +1,6 @@
 #include "data_processor.h"
 #include "dwt.h"
 #include "image.h"
-#include "stack_monitor.h"
 #include "stm32g4xx_hal.h"
 #include "stm32g4xx_hal_def.h"
 #include "sysmem.h"
@@ -205,6 +204,6 @@ extern "C" void process_data(PacketHeader *header, Metadata *metadata,
   }
 
   metadata->elapsed_time_ms = DWT_GetMs() - metadata->elapsed_time_ms;
-  metadata->stack_mem_usage = stack_get_peak_usage();
-  metadata->heap_mem_usage = static_cast<float>(Heap_GetPeakUsage()) / 512.F;
+  metadata->stack_mem_usage = Stack_GetPeakUsage();
+  metadata->heap_mem_usage = Heap_GetPeakUsage();
 }

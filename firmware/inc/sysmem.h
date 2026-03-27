@@ -25,11 +25,12 @@ extern "C" {
 #include <stdint.h>
 
 /**
- * @brief Returns the peak heap usage since boot.
+ * @brief Returns the peak heap usage since boot as a fraction of the total
+ *        heap size (_Min_Heap_Size from the linker script).
  *
- * @return Number of bytes that were allocated at peak heap usage.
+ * @return Value in [0.0, 1.0] representing the peak fraction of heap used.
  */
-uint32_t Heap_GetPeakUsage(void);
+float Heap_GetPeakUsage(void);
 
 /**
  * @brief Returns the current heap usage.
@@ -37,6 +38,21 @@ uint32_t Heap_GetPeakUsage(void);
  * @return Number of bytes currently allocated on the heap.
  */
 uint32_t Heap_GetCurrentUsage(void);
+
+/**
+ * @brief Fills the stack region (from _sstack up to the current SP) with a
+ *        known sentinel value (0xDEADBEEF). Must be called as early as
+ *        possible in the startup sequence, before any stack is used.
+ */
+void Stack_Paint(void);
+
+/**
+ * @brief Returns the peak stack usage since boot as a fraction of the total
+ *        stack size.
+ *
+ * @return Value in [0.0, 1.0] representing the peak fraction of stack used.
+ */
+float Stack_GetPeakUsage(void);
 
 #ifdef __cplusplus
 }

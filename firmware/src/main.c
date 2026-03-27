@@ -4,8 +4,8 @@
 #include "dma.h"
 #include "dwt.h"
 #include "gpio.h"
-#include "stack_monitor.h"
 #include "stm32g4xx_hal.h"
+#include "sysmem.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
 
@@ -19,7 +19,7 @@ volatile McuState currentState = {WAITING_INPUT};
  * @retval int
  */
 int main(void) {
-  stack_paint();
+  Stack_Paint();
   HAL_Init();
   SystemClock_Config();
   MX_GPIO_Init();
