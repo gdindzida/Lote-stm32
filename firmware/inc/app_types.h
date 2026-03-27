@@ -14,6 +14,7 @@ extern "C" {
 #define APP_RX_DATA_SIZE (2 * APP_RX_BUFFER_SIZE)
 #define APP_TX_DATA_SIZE (1024)
 
+// NOLINTNEXTLINE
 typedef enum {
   WAITING_INPUT,
   PROCESS_DATA,
@@ -23,11 +24,19 @@ typedef enum {
   WAITING_OUT_DATA,
 } McuState;
 
+// NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint8_t row;
   uint8_t col;
 } Coordinate;
 
+// NOLINTNEXTLINE
+typedef struct __attribute__((packed)) {
+  uint16_t magic;
+  uint16_t length;
+} PacketHeader;
+
+// NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint32_t elapsed_time_ms;
   uint32_t sum;
@@ -35,11 +44,8 @@ typedef struct __attribute__((packed)) {
   float stack_mem_usage;
   float heap_mem_usage;
 } Metadata;
-typedef struct __attribute__((packed)) {
-  uint16_t magic;
-  uint16_t length;
-} PacketHeader;
 
+// NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   PacketHeader header;
   Metadata metadata;

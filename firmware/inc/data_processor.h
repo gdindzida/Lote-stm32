@@ -13,8 +13,7 @@ struct Corner {
   uint32_t score;
 };
 
-void process_data(PacketHeader *header, Metadata *metadata,
-                  Coordinate *coordinates);
+void process_data(Payload *payload);
 
 #ifdef __cplusplus
 }

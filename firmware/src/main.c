@@ -34,17 +34,13 @@ int main(void) {
     McuState snapshot = currentState;
     if (snapshot == PROCESS_DATA) {
       currentState = SEND_DATA;
-      // } else if (snapshot == SEND_HEADER) {
-      //   currentState = WAITING_OUT_HEADER;
     } else if (snapshot == SEND_DATA) {
       currentState = WAITING_OUT_DATA;
     }
     __enable_irq();
 
     if (snapshot == PROCESS_DATA) {
-      process_data(&payload.header, &payload.metadata, payload.coordinates);
-      // } else if (snapshot == SEND_HEADER) {
-      //   CDC_Transmit_FS((uint8_t *)&header, sizeof(PacketHeader));
+      process_data(&payload);
     } else if (snapshot == SEND_DATA) {
       uint16_t length = sizeof(PacketHeader) + sizeof(Metadata) +
                         (sizeof(Coordinate) * payload.metadata.num_points);

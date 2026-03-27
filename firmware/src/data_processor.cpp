@@ -1,4 +1,5 @@
 #include "data_processor.h"
+#include "app_types.h"
 #include "dwt.h"
 #include "image.h"
 #include "stm32g4xx_hal.h"
@@ -6,7 +7,6 @@
 #include "sysmem.h"
 #include "usbd_cdc_if.h"
 #include "usbd_def.h"
-#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -28,7 +28,7 @@ bool null_then(int value, int threshold) {
   return false;
 }
 
-void fast_detector(uint8_t *img_data, std::array<Corner, 32> &corners,
+void fast_detector(const uint8_t *img_data, std::array<Corner, 32> &corners,
                    uint32_t &number_of_corners) {
   std::array<uint8_t, 16> circle;
   ComparisonFunc comp_func = null_then;
@@ -158,9 +158,6 @@ void fast_detector(uint8_t *img_data, std::array<Corner, 32> &corners,
               one_found = true;
             }
           }
-
-          // corners[number_of_corners].row = row;
-          // corners[number_of_corners].col = col;
         }
       }
 
@@ -173,37 +170,32 @@ void fast_detector(uint8_t *img_data, std::array<Corner, 32> &corners,
 
 } // namespace
 
-extern "C" void process_data(PacketHeader *header, Metadata *metadata,
-                             Coordinate *coordinates) {
-  metadata->elapsed_time_ms = DWT_GetMs();
+extern "C" void process_data(Payload *payload) {
+  payload->metadata.elapsed_time_ms = DWT_GetMs();
 
-  header->magic = MAGIC;
-  header->length = 0;
+  payload->header.magic = MAGIC;
+  payload->header.length = 0;
 
   uint32_t currentRxBufferOffset = rxBufferOffset + APP_RX_BUFFER_SIZE;
   currentRxBufferOffset %= APP_RX_DATA_SIZE;
   uint8_t *bufferView = UserRxBufferFS + currentRxBufferOffset;
 
-  uint32_t sum = 0;
-  for (int i = 0; i < APP_RX_BUFFER_SIZE; i++) {
-    sum += bufferView[i];
-  }
-
   std::array<Corner, 32> corners;
   uint32_t number_of_corners = 0;
   fast_detector(bufferView, corners, number_of_corners);
 
-  metadata->sum = number_of_corners;
-  metadata->num_points = MIN(32, number_of_corners);
-  header->length =
-      sizeof(Metadata) + (metadata->num_points * sizeof(Coordinate));
+  payload->metadata.sum = currentRxBufferOffset;
+  payload->metadata.num_points = MIN(32, number_of_corners);
+  payload->header.length =
+      sizeof(Metadata) + (payload->metadata.num_points * sizeof(Coordinate));
 
-  for (int i = 0; i < metadata->num_points; i++) {
-    coordinates[i].row = corners[i].row;
-    coordinates[i].col = corners[i].col;
+  for (int i = 0; i < payload->metadata.num_points; i++) {
+    payload->coordinates[i].row = corners[i].row;
+    payload->coordinates[i].col = corners[i].col;
   }
 
-  metadata->elapsed_time_ms = DWT_GetMs() - metadata->elapsed_time_ms;
-  metadata->stack_mem_usage = Stack_GetPeakUsage();
-  metadata->heap_mem_usage = Heap_GetPeakUsage();
+  payload->metadata.elapsed_time_ms =
+      DWT_GetMs() - payload->metadata.elapsed_time_ms;
+  payload->metadata.stack_mem_usage = Stack_GetPeakUsage();
+  payload->metadata.heap_mem_usage = Heap_GetPeakUsage();
 }
