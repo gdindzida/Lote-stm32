@@ -5,6 +5,7 @@ from typing import Optional, Tuple, Any
 import numpy as np
 import os
 import statistics
+import argparse
 
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
 import cv2
@@ -44,12 +45,36 @@ def find_stm32_port() -> str:
     raise RuntimeError("STM32 CDC port not found")
 
 
-# def send_image(ser: serial.Serial, img: np.ndarray) -> None:
-#     """send raw image bytes."""
-#     raw = img.tobytes()  # H×W×C uint8, row-major
-#     ser.write(raw)
+@dataclass
+class FrameRecord:
+    small_img: np.ndarray
+    left_img: np.ndarray
+    payload: bytes
+    meta: Metadata
+    meta_size: int
+    timestamp: float = 0.0
+
 
 if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="Run HIL test with optional playback.")
+    playback_group = parser.add_mutually_exclusive_group()
+    playback_group.add_argument(
+        "--playback",
+        type=int,
+        metavar="DELAY_MS",
+        default=None,
+        help="Replay recorded frames after statistics with a fixed delay in ms between frames.",
+    )
+    playback_group.add_argument(
+        "--playback-realtime",
+        action="store_true",
+        default=False,
+        help="Replay recorded frames after statistics using the original inter-frame timings.",
+    )
+    args = parser.parse_args()
+
+    do_record = args.playback is not None or args.playback_realtime
 
     data_root: str = "modules/gaspar/data/2011_09_26_drive_0001_sync"
     print("Entering ", data_root)
@@ -64,6 +89,7 @@ if __name__ == "__main__":
     process_elapsed_times: List[float] = []
     peak_stack_memory = 0
     peak_heap_memory = 0
+    recorded_frames: List[FrameRecord] = []
 
     print("Starting KITTI clip playback...")
 
@@ -96,8 +122,6 @@ if __name__ == "__main__":
 
     while streamer.has_next():
 
-        # print("\n")
-        # print("\n")
         result = streamer.next()
         if result is None:
             print("Images are None!")
@@ -114,8 +138,6 @@ if __name__ == "__main__":
             continue
 
         small_img = cv2.resize(left_img, (128, 64), interpolation=cv2.INTER_AREA)
-        # print(left_img.shape)
-        # print(small_img.shape)
         img_data = small_img.tobytes()
 
         new_loop_time = time.time()
@@ -123,24 +145,16 @@ if __name__ == "__main__":
         loop_time = new_loop_time
 
         # Send image
-        # print("Sending data...")
         ser.write(img_data)
-        # time.sleep(1)
 
         # Wait for response
-        # print("Waiting for header...")
         header_bytes = ser.read(struct.calcsize(HEADER_FMT))
         magic, length = struct.unpack(HEADER_FMT, header_bytes)
-        # time.sleep(1)
 
         if magic != MAGIC:
             raise ValueError(f"Bad magic: {hex(magic)}")
 
-        # print("Waiting for payload= ", length, " bytes")
         payload = ser.read(length)
-        # time.sleep(1)
-
-        # print("Elapsed time: ", elapsed_time)
 
         meta_size = struct.calcsize(METADATA_FMT)
         meta_raw = struct.unpack(METADATA_FMT, payload[:meta_size])
@@ -150,49 +164,17 @@ if __name__ == "__main__":
         peak_stack_memory = meta.stack_mem_usage
         peak_heap_memory = meta.heap_mem_usage
 
-        # print("Got sum= ", meta.sum, " for real sum= ", sum(img_data))
-        # print("Got process process elapsed time(us)= ", meta.process_elapsed_time_ms)
-        # print("Peak stack mem usage= ", 100 * meta.stack_mem_usage, "%")
-        # print("Peak stack mem usage= ", 100 * meta.heap_mem_usage, "%")
-        # small_annotated = cv2.cvtColor(small_img.copy(), cv2.COLOR_GRAY2BGR)
-        # big_annotated = cv2.cvtColor(left_img.copy(), cv2.COLOR_GRAY2BGR)
-
-        # scale_x = left_img.shape[1] / 128.0
-        # scale_y = left_img.shape[0] / 64.0
-
-        # if meta.num_points > 0:
-        #     coord_size = struct.calcsize(COORD_FMT)
-        #     offset = meta_size
-        #     print("Got this many points: ", meta.num_points)
-        #     for i in range(meta.num_points):
-        #         x, y = struct.unpack(COORD_FMT, payload[offset : offset + coord_size])
-        #         offset += coord_size
-        #         x, y = int(x) & 0xFF, int(y) & 0xFF  # interpret as uint8_t (0–255)
-        #         print(f"  point[{i}]: x={y}, y={x}")
-
-        #         # Draw on small image (coordinates are in small image space)
-        #         cv2.circle(
-        #             small_annotated, (y, x), radius=2, color=(0, 255, 0), thickness=-1
-        #         )
-
-        #         # Scale up and draw on big image
-        #         big_x = int(x * scale_y)
-        #         big_y = int(y * scale_x)
-        #         cv2.circle(
-        #             big_annotated,
-        #             (big_y, big_x),
-        #             radius=5,
-        #             color=(0, 255, 0),
-        #             thickness=-1,
-        #         )
-        # else:
-        #     print("No points!")
-
-        # cv2.imshow("Left", big_annotated)
-        # cv2.imshow("Small left", small_annotated)
-        # key = cv2.waitKey(1)
-        # if key == ord("q"):  # press Q to quit
-        #     break
+        if do_record:
+            recorded_frames.append(
+                FrameRecord(
+                    small_img=small_img.copy(),
+                    left_img=left_img.copy(),
+                    payload=payload,
+                    meta=meta,
+                    meta_size=meta_size,
+                    timestamp=time.time(),
+                )
+            )
 
     header_bytes = ser.read(struct.calcsize(HEADER_FMT))
     magic, length = struct.unpack(HEADER_FMT, header_bytes)
@@ -214,6 +196,19 @@ if __name__ == "__main__":
     process_elapsed_times.append(meta.process_elapsed_time_ms)
     peak_stack_memory = meta.stack_mem_usage
     peak_heap_memory = meta.heap_mem_usage
+
+    if do_record:
+        assert small_img is not None and left_img is not None
+        recorded_frames.append(
+            FrameRecord(
+                small_img=small_img.copy(),
+                left_img=left_img.copy(),
+                payload=payload,
+                meta=meta,
+                meta_size=meta_size,
+                timestamp=time.time(),
+            )
+        )
 
     print("")
     print("Statistics")
@@ -250,6 +245,73 @@ if __name__ == "__main__":
     print("")
     print("Peak stack memory usage: ", 100 * peak_stack_memory, "%")
     print("Peak heap memory usage: ", 100 * peak_heap_memory, "%")
+
+    if args.playback is not None or args.playback_realtime:
+        print("")
+        if args.playback_realtime:
+            print(
+                f"Starting realtime playback of {len(recorded_frames)} frames (original timings)..."
+            )
+        else:
+            print(
+                f"Starting playback of {len(recorded_frames)} frames (delay={args.playback}ms)..."
+            )
+        for idx, frame in enumerate(recorded_frames):
+            if args.playback_realtime:
+                if idx + 1 < len(recorded_frames):
+                    frame_delay_ms = int(
+                        (recorded_frames[idx + 1].timestamp - frame.timestamp) * 1000
+                    )
+                else:
+                    frame_delay_ms = 1  # last frame: just wait 1ms
+            else:
+                frame_delay_ms = args.playback  # type: ignore[assignment]
+
+            small_annotated = cv2.cvtColor(frame.small_img.copy(), cv2.COLOR_GRAY2BGR)
+            big_annotated = cv2.cvtColor(frame.left_img.copy(), cv2.COLOR_GRAY2BGR)
+
+            scale_x = frame.left_img.shape[1] / 128.0
+            scale_y = frame.left_img.shape[0] / 64.0
+
+            if frame.meta.num_points > 0:
+                coord_size = struct.calcsize(COORD_FMT)
+                offset = frame.meta_size
+                # print("Got this many points: ", frame.meta.num_points)
+                for i in range(frame.meta.num_points):
+                    x, y = struct.unpack(
+                        COORD_FMT, frame.payload[offset : offset + coord_size]
+                    )
+                    offset += coord_size
+                    x, y = int(x) & 0xFF, int(y) & 0xFF  # interpret as uint8_t (0–255)
+                    # print(f"  point[{i}]: x={y}, y={x}")
+
+                    # Draw on small image (coordinates are in small image space)
+                    cv2.circle(
+                        small_annotated,
+                        (y, x),
+                        radius=2,
+                        color=(0, 255, 0),
+                        thickness=-1,
+                    )
+
+                    # Scale up and draw on big image
+                    big_x = int(x * scale_y)
+                    big_y = int(y * scale_x)
+                    cv2.circle(
+                        big_annotated,
+                        (big_y, big_x),
+                        radius=5,
+                        color=(0, 255, 0),
+                        thickness=-1,
+                    )
+            else:
+                print("No points!")
+
+            cv2.imshow("Left", big_annotated)
+            cv2.imshow("Small left", small_annotated)
+            key = cv2.waitKey(frame_delay_ms)
+            if key == ord("q"):  # press Q to quit
+                break
 
     # streamer.run()
     cv2.destroyAllWindows()
