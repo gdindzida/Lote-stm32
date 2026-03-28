@@ -1,9 +1,11 @@
 #include "usbd_cdc_if.h"
+#include "app_types.h"
 #include <stdint.h>
 
 // new
 extern USBD_HandleTypeDef hUsbDeviceFS;
-extern volatile McuState currentState;
+extern volatile WorkPackageType work_queue[WORK_QUEUE_SIZE];
+extern volatile uint8_t current_queue_in_index;
 uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 volatile uint32_t rxBufferOffset = 0;
@@ -124,17 +126,23 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length) {
  * USBD_FAIL
  */
 static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
-  if (currentState == WAITING_INPUT) {
-    packetCounter++;
+  packetCounter++;
 
-    if (packetCounter >= NUM_OF_PACKETS) {
-      packetCounter = 0;
-      currentState = PROCESS_DATA;
-      rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
-      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
+  if (packetCounter >= NUM_OF_PACKETS) {
+    packetCounter = 0;
+
+    if (rxBufferOffset == 0) {
+      work_queue[current_queue_in_index] = PROCESS_RX_1;
     } else {
-      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf + *Len);
+      work_queue[current_queue_in_index] = PROCESS_RX_2;
     }
+    current_queue_in_index++;
+    current_queue_in_index %= WORK_QUEUE_SIZE;
+
+    rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
+  } else {
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf + *Len);
   }
 
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
@@ -179,11 +187,5 @@ static int8_t CDC_TransmitCplt_FS(uint8_t *Buf, uint32_t *Len, uint8_t epnum) {
   UNUSED(Buf);
   UNUSED(Len);
   UNUSED(epnum);
-  // if (currentState == WAITING_OUT_HEADER) {
-  //   currentState = SEND_DATA;
-  // }
-  if (currentState == WAITING_OUT_DATA) {
-    currentState = WAITING_INPUT;
-  }
   return result;
 }

@@ -9,10 +9,11 @@
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
 
-// Other
 void SystemClock_Config(void);
 
-volatile McuState currentState = {WAITING_INPUT};
+volatile WorkPackageType work_queue[WORK_QUEUE_SIZE] = {0};
+volatile uint8_t current_queue_in_index = 0;
+volatile uint8_t current_queue_out_index = 0;
 
 /**
  * @brief  The application entry point.
@@ -31,17 +32,16 @@ int main(void) {
 
   while (1) {
     __disable_irq();
-    McuState snapshot = currentState;
-    if (snapshot == PROCESS_DATA) {
-      currentState = SEND_DATA;
-    } else if (snapshot == SEND_DATA) {
-      currentState = WAITING_OUT_DATA;
+    WorkPackageType work_package_type = NO_WORK;
+    if (current_queue_in_index != current_queue_out_index) {
+      work_package_type = work_queue[current_queue_out_index];
+      current_queue_out_index++;
+      current_queue_out_index %= WORK_QUEUE_SIZE;
     }
     __enable_irq();
 
-    if (snapshot == PROCESS_DATA) {
-      process_data(&payload);
-    } else if (snapshot == SEND_DATA) {
+    if (work_package_type != NO_WORK) {
+      process_data(&payload, work_package_type);
       uint16_t length = sizeof(PacketHeader) + sizeof(Metadata) +
                         (sizeof(Coordinate) * payload.metadata.num_points);
       CDC_Transmit_FS((uint8_t *)&payload, length);

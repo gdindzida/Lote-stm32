@@ -13,16 +13,14 @@ extern "C" {
 #define NUM_OF_PACKETS (APP_RX_BUFFER_SIZE / PACKET_SIZE)
 #define APP_RX_DATA_SIZE (2 * APP_RX_BUFFER_SIZE)
 #define APP_TX_DATA_SIZE (1024)
+#define WORK_QUEUE_SIZE (2)
 
 // NOLINTNEXTLINE
 typedef enum {
-  WAITING_INPUT,
-  PROCESS_DATA,
-  // SEND_HEADER,
-  // WAITING_OUT_HEADER,
-  SEND_DATA,
-  WAITING_OUT_DATA,
-} McuState;
+  NO_WORK,
+  PROCESS_RX_1,
+  PROCESS_RX_2,
+} WorkPackageType;
 
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {

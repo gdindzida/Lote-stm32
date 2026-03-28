@@ -170,21 +170,23 @@ void fast_detector(const uint8_t *img_data, std::array<Corner, 32> &corners,
 
 } // namespace
 
-extern "C" void process_data(Payload *payload) {
+extern "C" void process_data(Payload *payload,
+                             WorkPackageType work_package_type) {
   payload->metadata.elapsed_time_ms = DWT_GetMs();
 
   payload->header.magic = MAGIC;
   payload->header.length = 0;
 
-  uint32_t currentRxBufferOffset = rxBufferOffset + APP_RX_BUFFER_SIZE;
-  currentRxBufferOffset %= APP_RX_DATA_SIZE;
-  uint8_t *bufferView = UserRxBufferFS + currentRxBufferOffset;
+  uint8_t *bufferView = UserRxBufferFS;
+  if (work_package_type == PROCESS_RX_2) {
+    bufferView += APP_RX_BUFFER_SIZE;
+  }
 
   std::array<Corner, 32> corners;
   uint32_t number_of_corners = 0;
   fast_detector(bufferView, corners, number_of_corners);
 
-  payload->metadata.sum = currentRxBufferOffset;
+  payload->metadata.sum = work_package_type;
   payload->metadata.num_points = MIN(32, number_of_corners);
   payload->header.length =
       sizeof(Metadata) + (payload->metadata.num_points * sizeof(Coordinate));

@@ -13,7 +13,7 @@ struct Corner {
   uint32_t score;
 };
 
-void process_data(Payload *payload);
+void process_data(Payload *payload, WorkPackageType work_package_type);
 
 #ifdef __cplusplus
 }
