@@ -42,8 +42,7 @@ int main(void) {
 
     if (work_package_type != NO_WORK) {
       process_data(&payload, work_package_type);
-      uint16_t length = sizeof(PacketHeader) + sizeof(Metadata) +
-                        (sizeof(Coordinate) * payload.metadata.num_points);
+      uint16_t length = sizeof(PacketHeader) + sizeof(Metadata);
       CDC_Transmit_FS((uint8_t *)&payload, length);
     }
   }

@@ -96,3 +96,5 @@ Memory region         Used Size  Region Size  %age Used
 ![Alt Text](./docs/memory.drawio.svg)
 
 ![Alt Text](./docs/pipelining.drawio.svg)
+
+![Alt Text](./docs/sad.drawio.svg)

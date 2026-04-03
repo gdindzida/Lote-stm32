@@ -13,6 +13,24 @@ struct Corner {
   uint32_t score;
 };
 
+struct LSE_data {
+  uint8_t N;
+  int16_t u_sum;
+  int16_t v_sum;
+  uint32_t rx_sum;
+  uint32_t ry_sum;
+  uint32_t rx2_sum;
+  uint32_t ry2_sum;
+  uint32_t rxv_sum;
+  uint32_t ryu_sum;
+};
+
+struct LSE_solution {
+  float tx;
+  float ty;
+  float theta;
+};
+
 void process_data(Payload *payload, WorkPackageType work_package_type);
 
 #ifdef __cplusplus

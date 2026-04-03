@@ -13,7 +13,15 @@ extern "C" {
 #define NUM_OF_PACKETS (APP_RX_BUFFER_SIZE / PACKET_SIZE)
 #define APP_RX_DATA_SIZE (2 * APP_RX_BUFFER_SIZE)
 #define APP_TX_DATA_SIZE (1024)
+#define CENTER_COL (63)
+#define CENTER_ROW (31)
 #define WORK_QUEUE_SIZE (2)
+#define SAD_BLOCK_SIZE (8)
+#define SEARCH_SIZE (4)
+#define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
+#define K_FACTOR (2)
+#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 20)
+#define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
 
 // NOLINTNEXTLINE
 typedef enum {
@@ -24,8 +32,8 @@ typedef enum {
 
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
-  uint8_t row;
-  uint8_t col;
+  int16_t row;
+  int16_t col;
 } Coordinate;
 
 // NOLINTNEXTLINE
@@ -37,10 +45,14 @@ typedef struct __attribute__((packed)) {
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint32_t elapsed_time_ms;
-  uint32_t sum;
+  int16_t sum_u;
+  int16_t sum_v;
   uint16_t num_points;
   float stack_mem_usage;
   float heap_mem_usage;
+  float tx;
+  float ty;
+  float theta;
 } Metadata;
 
 // NOLINTNEXTLINE
