@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     import numpy as np
+    from hil.protocol import Coordinate
 
 
 def plot_timing(

@@ -8,8 +8,9 @@ APP_RX_BUFFER_SIZE = (
 )
 HEADER_FMT = "<HH"
 METADATA_FMT = "<IhhHfffff"
-# Each Coordinate is two signed int16_t fields (row=u, col=v) as packed by the firmware.
-COORD_FMT = "<hh"
+# Each Coordinate is two signed int16_t fields (row=u, col=v) plus one uint8_t bool
+# (valid = min_sad < SAD_CEILING) as packed by the firmware.
+COORD_FMT = "<hhB"
 NUM_COORDS = 121  # 11 columns × 11 rows
 
 
@@ -39,3 +40,4 @@ class Coordinate:
 
     u: int  # horizontal (x) displacement  — firmware field: row
     v: int  # vertical   (y) displacement  — firmware field: col
+    valid: bool = False  # True when min_sad < SAD_CEILING (point taken into account)

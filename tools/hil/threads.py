@@ -226,7 +226,6 @@ def reader_thread_fn(
             error_event.set()
             break
 
-        print("BOKTE citam velicinu ", length)
         payload = ser.read(length)
         if len(payload) < length:
             print("Reader: timeout waiting for payload")
@@ -271,8 +270,10 @@ def reader_thread_fn(
             coords: List[Coordinate] = []
             for i in range(NUM_COORDS):
                 offset = meta_size + i * coord_size
-                u, v = struct.unpack(COORD_FMT, payload[offset : offset + coord_size])
-                coords.append(Coordinate(u=u, v=v))
+                u, v, valid = struct.unpack(
+                    COORD_FMT, payload[offset : offset + coord_size]
+                )
+                coords.append(Coordinate(u=u, v=v, valid=bool(valid)))
 
             recorded_frames.append(
                 FrameRecord(

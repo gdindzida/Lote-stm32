@@ -169,7 +169,9 @@ def load_ground_truth(
     gsd_m_per_px: float = 0.0,
     hfov_deg: float = 60.0,
     vfov_deg: float | None = None,
-) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", float, float]:
+) -> Tuple[
+    "np.ndarray", "np.ndarray", "np.ndarray", "float | np.ndarray", "float | np.ndarray"
+]:
     """Load query telemetry and compute per-frame ground-truth tx/ty/theta.
 
     GSD resolution order
@@ -177,8 +179,9 @@ def load_ground_truth(
     1. *gsd_m_per_px > 0* → use it for **both** axes (manual override,
        square-pixel assumption).
     2. *gsd_m_per_px ≤ 0* and ``altitude`` column present in query.csv →
-       auto-compute per-axis GSD from mean altitude + *hfov_deg* /
-       *vfov_deg* via :func:`compute_gsd`.
+       auto-compute **per-frame** per-axis GSD from each frame's individual
+       ``altitude`` value + *hfov_deg* / *vfov_deg* via :func:`compute_gsd`.
+       This correctly accounts for altitude variation across the flight.
     3. Both conditions fail → raise :class:`ValueError`.
 
     Parameters
@@ -188,12 +191,12 @@ def load_ground_truth(
         Must contain a ``query.csv`` file with columns:
         ``easting``, ``northing``, ``orient_x``, ``orient_y``,
         ``orient_z``, ``orient_w``.
-        If ``altitude`` is also present it is used for automatic GSD
-        derivation when *gsd_m_per_px ≤ 0*.
+        If ``altitude`` is also present it is used for automatic per-frame
+        GSD derivation when *gsd_m_per_px ≤ 0*.
     gsd_m_per_px:
         Uniform Ground Sample Distance in **metres per pixel** applied to
-        both axes.  Pass ``0.0`` (default) to auto-compute per-axis GSD
-        from the ``altitude`` column, *hfov_deg*, and *vfov_deg*.
+        both axes.  Pass ``0.0`` (default) to auto-compute per-frame
+        per-axis GSD from the ``altitude`` column, *hfov_deg*, and *vfov_deg*.
     hfov_deg:
         Camera **horizontal** field of view in degrees (default 60°).
         Controls the *tx* (East) axis GSD.  Used only in auto mode.
@@ -208,9 +211,10 @@ def load_ground_truth(
         Ground-truth arrays aligned with the query image index.
         The *last* entry of each array is ``NaN`` because there is no
         frame *i + 1* for the final image.
-    gsd_x, gsd_y : float
-        GSD values (m/px) applied to the East (*tx*) and North (*ty*) axes
-        respectively.  Equal when *gsd_m_per_px* > 0 or HFOV == VFOV.
+    gsd_x, gsd_y : float or np.ndarray, shape (N,)
+        GSD values (m/px) for the East (*tx*) and North (*ty*) axes.
+        Returns a scalar ``float`` when *gsd_m_per_px* > 0 (manual uniform
+        GSD), or a per-frame ``np.ndarray`` when auto-computed from altitude.
     """
     query_csv_path = os.path.join(data_root, "query.csv")
     if not os.path.isfile(query_csv_path):
@@ -248,18 +252,30 @@ def load_ground_truth(
 
     # --- Resolve GSD (per-axis) ---
     if gsd_m_per_px > 0.0:
-        # Manual uniform GSD: same value for both axes.
-        gsd_x = gsd_y = gsd_m_per_px
+        # Manual uniform GSD: same scalar value for both axes.
+        gsd_x: "float | np.ndarray" = gsd_m_per_px
+        gsd_y: "float | np.ndarray" = gsd_m_per_px
         print(f"  GSD (manual)     : gsd_x={gsd_x:.4f}  gsd_y={gsd_y:.4f}  m/px")
     elif "altitude" in header:
+        # Per-frame GSD: compute gsd_x[i] and gsd_y[i] from each frame's altitude.
         altitudes = np.array([float(r["altitude"]) for r in rows], dtype=np.float64)
-        mean_alt = float(np.mean(altitudes))
         effective_vfov = vfov_deg if vfov_deg is not None else hfov_deg
-        gsd_x, gsd_y = compute_gsd(mean_alt, hfov_deg, vfov_deg)
+        gsd_x_arr = np.empty(n, dtype=np.float64)
+        gsd_y_arr = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            gsd_x_arr[i], gsd_y_arr[i] = compute_gsd(altitudes[i], hfov_deg, vfov_deg)
+        gsd_x = gsd_x_arr
+        gsd_y = gsd_y_arr
         print(
-            f"  GSD auto-computed: gsd_x={gsd_x:.4f}  gsd_y={gsd_y:.4f}  m/px"
-            f"  [mean alt={mean_alt:.1f} m,"
-            f" HFOV={hfov_deg:.1f}°, VFOV={effective_vfov:.1f}°]"
+            f"  GSD per-frame auto-computed from altitude"
+            f"  [alt range: {altitudes.min():.1f}–{altitudes.max():.1f} m,"
+            f" HFOV={hfov_deg:.1f}°, VFOV={effective_vfov:.1f}°]\n"
+            f"  gsd_x: mean={np.mean(gsd_x_arr):.4f}"
+            f"  min={np.min(gsd_x_arr):.4f}"
+            f"  max={np.max(gsd_x_arr):.4f}  m/px\n"
+            f"  gsd_y: mean={np.mean(gsd_y_arr):.4f}"
+            f"  min={np.min(gsd_y_arr):.4f}"
+            f"  max={np.max(gsd_y_arr):.4f}  m/px"
         )
     else:
         raise ValueError(
@@ -288,13 +304,22 @@ def load_ground_truth(
     ty_gt = np.full(n, np.nan, dtype=np.float64)
     theta_gt = np.full(n, np.nan, dtype=np.float64)
 
-    # Ground truth for frame i = motion from frame i → frame i+1
-    # tx uses gsd_x (horizontal/East), ty uses gsd_y (vertical/North)
+    # Ground truth for frame i = motion from frame i → frame i+1.
+    # tx uses gsd_x (horizontal/East), ty uses gsd_y (vertical/North).
+    # When GSD is a per-frame array, use gsd_x[i] / gsd_y[i] for each
+    # inter-frame displacement so that the altitude at the source frame
+    # is used for the pixel-unit conversion.
     dx_m = np.diff(easting)  # shape (n-1,)
     dy_m = np.diff(northing)  # shape (n-1,)
 
-    tx_gt[:-1] = dx_m / gsd_x
-    ty_gt[:-1] = dy_m / gsd_y
+    if isinstance(gsd_x, np.ndarray) and isinstance(gsd_y, np.ndarray):
+        # Per-frame GSD: gsd_x[i] corresponds to frame i → frame i+1.
+        tx_gt[:-1] = dx_m / gsd_x[:-1]
+        ty_gt[:-1] = dy_m / gsd_y[:-1]
+    else:
+        # Uniform GSD (manual override).
+        tx_gt[:-1] = dx_m / float(gsd_x)
+        ty_gt[:-1] = dy_m / float(gsd_y)
     theta_gt[:-1] = np.array(
         [_wrap_angle(yaws[i + 1] - yaws[i]) for i in range(n - 1)],
         dtype=np.float64,
@@ -459,7 +484,11 @@ def _fmt_axis(label: str, m: AxisMetrics, unit: str) -> str:
     )
 
 
-def print_kpi_report(result: KPIResult, gsd_x: float, gsd_y: float) -> None:
+def print_kpi_report(
+    result: KPIResult,
+    gsd_x: "float | np.ndarray",
+    gsd_y: "float | np.ndarray",
+) -> None:
     """Print a formatted KPI report to stdout.
 
     Parameters
@@ -468,8 +497,12 @@ def print_kpi_report(result: KPIResult, gsd_x: float, gsd_y: float) -> None:
         :class:`KPIResult` from :func:`compute_kpi`.
     gsd_x:
         GSD applied to the East / tx axis (m/px), for display only.
+        May be a scalar ``float`` (manual override) or a per-frame
+        ``np.ndarray`` (auto-computed from altitude).
     gsd_y:
         GSD applied to the North / ty axis (m/px), for display only.
+        May be a scalar ``float`` (manual override) or a per-frame
+        ``np.ndarray`` (auto-computed from altitude).
     """
     unit_trans = "px"
     unit_theta = "rad"
@@ -477,7 +510,23 @@ def print_kpi_report(result: KPIResult, gsd_x: float, gsd_y: float) -> None:
     print("")
     print("=" * 70)
     print("  HIL KPI — Translation & Rotation Accuracy")
-    if gsd_x == gsd_y:
+    if isinstance(gsd_x, np.ndarray) or isinstance(gsd_y, np.ndarray):
+        # Per-frame GSD: show summary statistics (mean / min / max).
+        gsd_x_arr = np.asarray(gsd_x, dtype=np.float64)
+        gsd_y_arr = np.asarray(gsd_y, dtype=np.float64)
+        print(
+            f"  GSD x (East)  [per-frame]: "
+            f"mean={np.mean(gsd_x_arr):.4f}"
+            f"  min={np.min(gsd_x_arr):.4f}"
+            f"  max={np.max(gsd_x_arr):.4f}  m/px  — tx"
+        )
+        print(
+            f"  GSD y (North) [per-frame]: "
+            f"mean={np.mean(gsd_y_arr):.4f}"
+            f"  min={np.min(gsd_y_arr):.4f}"
+            f"  max={np.max(gsd_y_arr):.4f}  m/px  — ty"
+        )
+    elif gsd_x == gsd_y:
         print(f"  GSD (x = y): {gsd_x:.4f} m/px  (tx/ty in 96×96 pixel units)")
     else:
         print(f"  GSD x (East) : {gsd_x:.4f} m/px  — used for tx ground truth")

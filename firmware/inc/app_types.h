@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define MAGIC (0xABCD)
@@ -19,7 +20,7 @@ extern "C" {
 #define SEARCH_SIZE (4)
 #define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
 #define K_FACTOR (2)
-#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 1)
+#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 5)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
 
 // NOLINTNEXTLINE
@@ -33,6 +34,7 @@ typedef enum {
 typedef struct __attribute__((packed)) {
   int16_t row;
   int16_t col;
+  bool valid;
 } Coordinate;
 
 // NOLINTNEXTLINE
