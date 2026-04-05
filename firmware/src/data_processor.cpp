@@ -170,8 +170,12 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.sum_u = lse_data.u_sum;
   payload->metadata.sum_v = lse_data.v_sum;
   payload->metadata.num_points = lse_data.N;
-  payload->metadata.tx = solution.tx;
-  payload->metadata.ty = solution.ty;
+  payload->metadata.tx =
+      solution.tx - (static_cast<float>(lse_data.ry_sum) * solution.theta /
+                     static_cast<float>(lse_data.N));
+  payload->metadata.ty =
+      solution.ty + (static_cast<float>(lse_data.rx_sum) * solution.theta /
+                     static_cast<float>(lse_data.N));
   payload->metadata.theta = solution.theta;
 
   payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
