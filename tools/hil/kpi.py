@@ -329,6 +329,500 @@ def load_ground_truth(
 
 
 # ---------------------------------------------------------------------------
+# Indoor ground-truth loading (INSANE dataset)
+# ---------------------------------------------------------------------------
+
+
+def _nearest_index(sorted_times: "np.ndarray", query_time: float) -> int:
+    """Return the index in *sorted_times* whose value is closest to *query_time*."""
+    idx = int(np.searchsorted(sorted_times, query_time))
+    if idx == 0:
+        return 0
+    if idx >= len(sorted_times):
+        return len(sorted_times) - 1
+    # Choose the closer of the two neighbours.
+    if abs(sorted_times[idx] - query_time) < abs(sorted_times[idx - 1] - query_time):
+        return idx
+    return idx - 1
+
+
+def load_ground_truth_indoor(
+    data_root: str,
+    sensors_root: str,
+    gsd_m_per_px: float,
+    hfov_deg: float = 60.0,
+    vfov_deg: float | None = None,
+) -> Tuple[
+    "np.ndarray",
+    "np.ndarray",
+    "np.ndarray",
+    "float | np.ndarray",
+    "float | np.ndarray",
+    "np.ndarray",
+    "np.ndarray",
+]:
+    """Load ground-truth tx / ty / theta for the INSANE indoor nav-cam dataset.
+
+    The function aligns high-rate motion-capture (or odometry) data to the
+    camera timestamps using **nearest-neighbour** interpolation, then computes
+    the inter-frame rigid-body motion in 96 × 96 pixel units.
+
+    GSD resolution order
+    --------------------
+    1. MoCap source (``mocap_vehicle_data.csv``) → **per-frame** GSD is
+       auto-computed from the aligned ``p_z`` column (height above ground)
+       and *hfov_deg* / *vfov_deg* via :func:`compute_gsd`.  *gsd_m_per_px*
+       is ignored in this case.
+    2. Odometry source (``rs_odom.csv``) → *gsd_m_per_px* is used as a
+       uniform scalar for both axes (no altitude available).  Must be > 0.
+
+    Parameters
+    ----------
+    data_root:
+        Path to the nav-cam folder (e.g. ``…/indoor_1_nav_cam``).
+        Must contain ``nav_cam_timestamps.csv``.
+    sensors_root:
+        Path to the matching sensors folder (e.g. ``…/indoor_1_sensors``).
+        Must contain ``mocap_vehicle_data.csv`` (preferred) or
+        ``rs_odom.csv`` (fallback).
+    gsd_m_per_px:
+        Scale factor in **metres per pixel** used as a uniform fallback when
+        the odometry source is selected (no ``p_z`` available).  Pass any
+        positive value; it is ignored when MoCap data is present.
+    hfov_deg:
+        Camera **horizontal** field of view in degrees (default 60°).
+        Used for the *tx* (x / right) axis GSD when MoCap is the source.
+    vfov_deg:
+        Camera **vertical** field of view in degrees.  Defaults to *hfov_deg*
+        (square-sensor assumption).  Used for the *ty* (y / forward) axis GSD
+        when MoCap is the source.
+
+    Returns
+    -------
+    tx_gt, ty_gt, theta_gt : np.ndarray, shape (N,)
+        Inter-frame ground-truth arrays aligned with the camera image index.
+        The **last** entry of each array is ``NaN`` (no frame *i + 1* for
+        the final image).
+    gsd_x, gsd_y : float or np.ndarray, shape (N,)
+        GSD values (m/px) for the x (*tx*) and y (*ty*) axes.
+        Returns per-frame ``np.ndarray`` when MoCap ``p_z`` is used, or a
+        scalar ``float`` when the odometry fallback is active.
+
+    Raises
+    ------
+    FileNotFoundError
+        If neither ``mocap_vehicle_data.csv`` nor ``rs_odom.csv`` is found in
+        *sensors_root*, or if ``nav_cam_timestamps.csv`` is missing from
+        *data_root*.
+    ValueError
+        If the odometry source is selected and *gsd_m_per_px* ≤ 0.
+
+    Notes
+    -----
+    The mocap / odometry CSV uses a **scalar-first** quaternion convention:
+    ``q_w, q_x, q_y, q_z``.  This differs from the UAV ``query.csv`` format
+    which stores ``orient_x, orient_y, orient_z, orient_w`` (scalar-last).
+    The yaw helper :func:`_quat_to_yaw` accepts ``(qx, qy, qz, qw)``, so
+    the columns are re-ordered accordingly.
+
+    When MoCap is the source the ``p_z`` column is treated as the camera
+    height above ground and fed into :func:`compute_gsd` to derive a
+    per-frame, per-axis GSD — identical to how the outdoor
+    :func:`load_ground_truth` uses the ``altitude`` column.
+    """
+
+    # --- Camera timestamps ---
+    cam_csv = os.path.join(data_root, "nav_cam_timestamps.csv")
+    if not os.path.isfile(cam_csv):
+        raise FileNotFoundError(
+            f"nav_cam_timestamps.csv not found in data_root: {data_root}"
+        )
+
+    cam_times: list[float] = []
+    with open(cam_csv, newline="") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                cam_times.append(float(parts[1]))
+            except ValueError:
+                continue
+    t_cam = np.array(cam_times, dtype=np.float64)
+    n = len(t_cam)
+    if n < 2:
+        raise ValueError(
+            f"nav_cam_timestamps.csv must have at least 2 rows " f"(found {n})."
+        )
+
+    # --- Sensor (mocap / odometry) data ---
+    mocap_csv = os.path.join(sensors_root, "mocap_vehicle_data.csv")
+    odom_csv = os.path.join(sensors_root, "rs_odom.csv")
+
+    if os.path.isfile(mocap_csv):
+        sensor_csv = mocap_csv
+        print(f"  GT source: mocap  ({sensor_csv})")
+    elif os.path.isfile(odom_csv):
+        sensor_csv = odom_csv
+        print(f"  GT source: rs_odom  ({sensor_csv})")
+    else:
+        raise FileNotFoundError(
+            f"No ground-truth sensor file found in sensors_root: {sensors_root}\n"
+            f"Expected 'mocap_vehicle_data.csv' or 'rs_odom.csv'."
+        )
+
+    # CSV header: t, p_x, p_y, p_z, q_w, q_x, q_y, q_z
+    use_mocap = sensor_csv == mocap_csv  # True → p_z available for GSD
+
+    s_t: list[float] = []
+    s_px: list[float] = []
+    s_py: list[float] = []
+    s_pz: list[float] = []
+    s_qw: list[float] = []
+    s_qx: list[float] = []
+    s_qy: list[float] = []
+    s_qz: list[float] = []
+
+    with open(sensor_csv, newline="") as fh:
+        import csv as _csv
+
+        reader = _csv.reader(fh)
+        header_row = next(reader)
+        # Strip whitespace from header names.
+        col = [h.strip() for h in header_row]
+        idx_t = col.index("t")
+        idx_px = col.index("p_x")
+        idx_py = col.index("p_y")
+        idx_pz: int = (
+            col.index("p_z") if use_mocap else 0
+        )  # 0 is a safe dummy; never read when not use_mocap
+        idx_qw = col.index("q_w")
+        idx_qx = col.index("q_x")
+        idx_qy = col.index("q_y")
+        idx_qz = col.index("q_z")
+        for row in reader:
+            if not row:
+                continue
+            try:
+                s_t.append(float(row[idx_t]))
+                s_px.append(float(row[idx_px]))
+                s_py.append(float(row[idx_py]))
+                if use_mocap:
+                    s_pz.append(float(row[idx_pz]))
+                s_qw.append(float(row[idx_qw]))
+                s_qx.append(float(row[idx_qx]))
+                s_qy.append(float(row[idx_qy]))
+                s_qz.append(float(row[idx_qz]))
+            except (ValueError, IndexError):
+                continue
+
+    t_sensor = np.array(s_t, dtype=np.float64)
+    px = np.array(s_px, dtype=np.float64)
+    py = np.array(s_py, dtype=np.float64)
+    pz = (
+        np.array(s_pz, dtype=np.float64) if use_mocap else np.empty(0, dtype=np.float64)
+    )
+    qw = np.array(s_qw, dtype=np.float64)
+    qx = np.array(s_qx, dtype=np.float64)
+    qy = np.array(s_qy, dtype=np.float64)
+    qz = np.array(s_qz, dtype=np.float64)
+    print(
+        f"  Sensor measurements: {len(t_sensor)}"
+        f"  time range: {t_sensor[0]:.3f} → {t_sensor[-1]:.3f} s"
+    )
+
+    # --- Nearest-neighbour alignment ---
+    # For each camera frame find the closest sensor measurement by timestamp.
+    aligned_px = np.empty(n, dtype=np.float64)
+    aligned_py = np.empty(n, dtype=np.float64)
+    aligned_pz = np.empty(n, dtype=np.float64)  # filled only when use_mocap
+    aligned_yaw = np.empty(n, dtype=np.float64)
+
+    for i in range(n):
+        si = _nearest_index(t_sensor, t_cam[i])
+        aligned_px[i] = px[si]
+        aligned_py[i] = py[si]
+        if use_mocap:
+            aligned_pz[i] = pz[si]
+        # Mocap / odometry: scalar-first quaternion (q_w, q_x, q_y, q_z).
+        # _quat_to_yaw expects scalar-last order (qx, qy, qz, qw).
+        aligned_yaw[i] = _quat_to_yaw(qx[si], qy[si], qz[si], qw[si])
+
+    # --- Resolve GSD ---
+    if use_mocap:
+        # Per-frame GSD derived from MoCap p_z (height above ground).
+        effective_vfov = vfov_deg if vfov_deg is not None else hfov_deg
+        gsd_x_arr = np.empty(n, dtype=np.float64)
+        gsd_y_arr = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            gsd_x_arr[i], gsd_y_arr[i] = compute_gsd(aligned_pz[i], hfov_deg, vfov_deg)
+        gsd_x: "float | np.ndarray" = gsd_x_arr
+        gsd_y: "float | np.ndarray" = gsd_y_arr
+        print(
+            f"  GSD per-frame from MoCap p_z"
+            f"  [p_z range: {aligned_pz.min():.3f}–{aligned_pz.max():.3f} m,"
+            f" HFOV={hfov_deg:.1f}°, VFOV={effective_vfov:.1f}°]\n"
+            f"  gsd_x: mean={np.mean(gsd_x_arr):.4f}"
+            f"  min={np.min(gsd_x_arr):.4f}"
+            f"  max={np.max(gsd_x_arr):.4f}  m/px\n"
+            f"  gsd_y: mean={np.mean(gsd_y_arr):.4f}"
+            f"  min={np.min(gsd_y_arr):.4f}"
+            f"  max={np.max(gsd_y_arr):.4f}  m/px"
+        )
+    else:
+        # Odometry fallback: uniform scalar GSD (no altitude available).
+        if gsd_m_per_px <= 0.0:
+            raise ValueError(
+                "Indoor ground truth with rs_odom requires an explicit --gsd M_PER_PX > 0.\n"
+                "There is no p_z column available to auto-compute the GSD."
+            )
+        gsd_x = gsd_m_per_px
+        gsd_y = gsd_m_per_px
+        print(f"  GSD (manual)     : gsd_x={gsd_x:.4f}  gsd_y={gsd_y:.4f}  m/px")
+
+    # Scaled image dimensions sent to the STM32.
+    _IMG_W: int = 96
+    _IMG_H: int = 96
+
+    # --- Inter-frame GT in pixel units (u / v) ---
+    # The STM32 outputs tx = mean(u_i) and ty = mean(v_i) over the 11×11
+    # block-matching grid.  The grid is symmetric around (CENTER_COL=47,
+    # CENTER_ROW=47), so the mean centred coordinate is (0, 0).
+    # We therefore evaluate the optical-flow formula at (x=0, y=0):
+    #
+    #   u = (fx / Z) · (Tx − x·Tz) − θ·y  →  u = fx·Tx / Z  at x=y=0
+    #   v = (fy / Z) · (Ty − y·Tz) + θ·x  →  v = fy·Ty / Z  at x=y=0
+    #
+    # where  fx = W / (2·tan(HFOV/2))  and  fy = H / (2·tan(VFOV/2)).
+    tx_gt = np.full(n, np.nan, dtype=np.float64)
+    ty_gt = np.full(n, np.nan, dtype=np.float64)
+    theta_gt = np.full(n, np.nan, dtype=np.float64)
+
+    # Inter-frame 3-D displacements
+    dx_m = np.diff(aligned_px)  # Tx, shape (n-1,)
+    dy_m = np.diff(aligned_py)  # Ty, shape (n-1,)
+
+    # Compute inter-frame yaw (θ) first — needed for the translation formula.
+    theta_gt[:-1] = np.array(
+        [_wrap_angle(aligned_yaw[i + 1] - aligned_yaw[i]) for i in range(n - 1)],
+        dtype=np.float64,
+    )
+
+    if use_mocap:
+        # MoCap source: full optical-flow formula.
+        # Focal lengths in pixels derived from FOV and image size.
+        hfov_rad = math.radians(hfov_deg)
+        effective_vfov_local = vfov_deg if vfov_deg is not None else hfov_deg
+        vfov_rad = math.radians(effective_vfov_local)
+        fx_px: float = _IMG_W / (2.0 * math.tan(hfov_rad / 2.0))
+        fy_px: float = _IMG_H / (2.0 * math.tan(vfov_rad / 2.0))
+
+        # Altitude change between consecutive frames (Tz).
+        dz_m = np.diff(aligned_pz)  # shape (n-1,)
+        # Depth Z at the source frame of each inter-frame pair.
+        Z_arr = aligned_pz[:-1]  # shape (n-1,)
+
+        # Evaluation point: image centre in centred pixel coordinates.
+        # Centred relative to the principal point (image centre for a symmetric
+        # sensor), so x_c = 0 and y_c = 0.  This matches the STM32 grid whose
+        # arithmetic mean centred coordinate is (0, 0).
+        x_c: float = 0.0  # centred column of evaluation point (pixels)
+        y_c: float = 0.0  # centred row    of evaluation point (pixels)
+
+        theta_arr = theta_gt[:-1]  # shape (n-1,)
+
+        # u = (fx/Z)·(Tx − x·Tz) − θ·y
+        tx_gt[:-1] = (fx_px / Z_arr) * (dx_m - x_c * dz_m) - theta_arr * y_c
+        # v = (fy/Z)·(Ty − y·Tz) + θ·x
+        ty_gt[:-1] = (fy_px / Z_arr) * (dy_m - y_c * dz_m) + theta_arr * x_c
+    else:
+        # Odometry fallback: no per-frame altitude → use uniform GSD scalar.
+        tx_gt[:-1] = dx_m / float(gsd_x)
+        ty_gt[:-1] = dy_m / float(gsd_y)
+
+    return tx_gt, ty_gt, theta_gt, gsd_x, gsd_y, aligned_px, aligned_py
+
+
+# ---------------------------------------------------------------------------
+# Kalman filter for velocity estimation
+# ---------------------------------------------------------------------------
+
+
+def kalman_filter_velocity(
+    frame_numbers: Sequence[int],
+    tx_pred: Sequence[float],
+    ty_pred: Sequence[float],
+    gsd_x: "float | np.ndarray",
+    gsd_y: "float | np.ndarray",
+    q_vel: float = 1.0,
+    r_vel: float = 5.0,
+) -> Tuple["np.ndarray", "np.ndarray"]:
+    """Estimate 2-D velocity from STM32 optical-flow using a Kalman filter.
+
+    Converts the per-frame pixel displacements *tx_pred* / *ty_pred* to metres
+    per frame using the per-axis ground-sample distances (*gsd_x*, *gsd_y*).
+    A **random-walk (constant-velocity) Kalman filter** then smooths the noisy
+    velocity measurements.
+
+    Model
+    -----
+    State : ``[vx, vy]``  — velocity in m/frame.
+
+    Process (F = I₂, random-walk assumption):
+
+    .. code-block:: none
+
+        vx_k = vx_{k-1}  (+process noise)
+        vy_k = vy_{k-1}  (+process noise)
+
+    Measurement (H = I₂): ``z_k = [vx_meas, vy_meas]``
+        where ``vx_meas = tx_pred[k] * gsd_x[k]`` and similarly for y.
+
+    Parameters
+    ----------
+    frame_numbers:
+        Dataset query-image indices for each prediction (used to index into
+        per-frame *gsd_x* / *gsd_y* arrays when they are ``np.ndarray``).
+    tx_pred, ty_pred:
+        STM32 pixel-displacement estimates (horizontal / vertical).
+    gsd_x, gsd_y:
+        Ground-sample distance (m/px).  Scalar or per-frame ``np.ndarray``
+        computed from *pz*, *hfov*, and *vfov* by :func:`compute_gsd`.
+    q_vel:
+        Process-noise variance for the velocity states ((m/frame)²).
+        Smaller values → smoother output but slower to track changes.
+    r_vel:
+        Measurement-noise variance for the velocity measurement ((m/frame)²).
+        Larger values → trust measurements less, rely more on the model.
+
+    Returns
+    -------
+    vx_est, vy_est : np.ndarray, shape (N,)
+        Kalman-filtered velocity estimates in metres per frame.
+    """
+    n = len(tx_pred)
+    if n == 0:
+        return np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
+
+    # --- Per-frame GSD ---
+    if isinstance(gsd_x, np.ndarray):
+        gx = np.array(
+            [float(gsd_x[min(fi, len(gsd_x) - 1)]) for fi in frame_numbers],
+            dtype=np.float64,
+        )
+    else:
+        gx = np.full(n, float(gsd_x), dtype=np.float64)
+
+    if isinstance(gsd_y, np.ndarray):
+        gy = np.array(
+            [float(gsd_y[min(fi, len(gsd_y) - 1)]) for fi in frame_numbers],
+            dtype=np.float64,
+        )
+    else:
+        gy = np.full(n, float(gsd_y), dtype=np.float64)
+
+    # --- Pixel → metric velocity (m/frame) ---
+    tx_a = np.asarray(tx_pred, dtype=np.float64)
+    ty_a = np.asarray(ty_pred, dtype=np.float64)
+    vx_meas = tx_a * gx
+    vy_meas = ty_a * gy
+
+    # --- Random-walk Kalman filter ---
+    # State: [vx, vy],  F = I₂,  H = I₂
+    F = np.eye(2, dtype=np.float64)
+    H = np.eye(2, dtype=np.float64)
+    Q = np.eye(2, dtype=np.float64) * q_vel
+    R = np.eye(2, dtype=np.float64) * r_vel
+    I2 = np.eye(2, dtype=np.float64)
+
+    state = np.zeros(2, dtype=np.float64)
+    P_cov = np.eye(2, dtype=np.float64) * 100.0
+
+    vx_out = np.zeros(n, dtype=np.float64)
+    vy_out = np.zeros(n, dtype=np.float64)
+
+    for i in range(n):
+        # Predict
+        state = F @ state
+        P_cov = F @ P_cov @ F.T + Q
+        # Measurement: velocity in metres per frame
+        z = np.array([vx_meas[i], vy_meas[i]])
+        # Update
+        innov_cov = H @ P_cov @ H.T + R
+        K = P_cov @ H.T @ np.linalg.inv(innov_cov)
+        state = state + K @ (z - H @ state)
+        P_cov = (I2 - K @ H) @ P_cov
+
+        vx_out[i] = state[0]
+        vy_out[i] = state[1]
+
+    return vx_out, vy_out
+
+
+def compute_velocity_gt(
+    frame_numbers: Sequence[int],
+    tx_gt: "np.ndarray",
+    ty_gt: "np.ndarray",
+    gsd_x: "float | np.ndarray",
+    gsd_y: "float | np.ndarray",
+) -> Tuple["np.ndarray", "np.ndarray"]:
+    """Extract ground-truth velocity (m/frame) aligned with *frame_numbers*.
+
+    The ground-truth pixel displacements *tx_gt* / *ty_gt* (one entry per
+    dataset frame, NaN for the last frame) are converted to metric velocity
+    using the per-axis ground-sample distances.
+
+    Parameters
+    ----------
+    frame_numbers:
+        Dataset frame indices for each prediction (same as passed to
+        :func:`kalman_filter_velocity`).
+    tx_gt, ty_gt:
+        Ground-truth pixel-displacement arrays indexed by dataset frame.
+        Entries are ``NaN`` for frames without a successor.
+    gsd_x, gsd_y:
+        Ground-sample distance (m/px).  Scalar or per-frame ``np.ndarray``.
+
+    Returns
+    -------
+    vx_gt, vy_gt : np.ndarray, shape (N,)
+        GT velocity in metres per frame.  Entries whose ground-truth frame
+        is NaN (e.g. the last dataset frame) are set to ``np.nan``.
+    """
+    n = len(frame_numbers)
+    gt_len = len(tx_gt)
+
+    if isinstance(gsd_x, np.ndarray):
+        gx = np.array(
+            [float(gsd_x[min(fi, len(gsd_x) - 1)]) for fi in frame_numbers],
+            dtype=np.float64,
+        )
+    else:
+        gx = np.full(n, float(gsd_x), dtype=np.float64)
+
+    if isinstance(gsd_y, np.ndarray):
+        gy = np.array(
+            [float(gsd_y[min(fi, len(gsd_y) - 1)]) for fi in frame_numbers],
+            dtype=np.float64,
+        )
+    else:
+        gy = np.full(n, float(gsd_y), dtype=np.float64)
+
+    vx_gt = np.full(n, np.nan, dtype=np.float64)
+    vy_gt = np.full(n, np.nan, dtype=np.float64)
+
+    for i, fi in enumerate(frame_numbers):
+        if fi < gt_len and not np.isnan(tx_gt[fi]):
+            vx_gt[i] = float(tx_gt[fi]) * gx[i]
+            vy_gt[i] = float(ty_gt[fi]) * gy[i]
+
+    return vx_gt, vy_gt
+
+
+# ---------------------------------------------------------------------------
 # Metrics computation
 # ---------------------------------------------------------------------------
 

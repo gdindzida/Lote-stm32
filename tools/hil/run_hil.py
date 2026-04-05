@@ -16,12 +16,22 @@ import serial
 
 from hil.frames import FrameItem, FrameRecord, IMG_SCALE_SIZE
 from hil.uav import UAVStreamer
+from hil.indoor import IndoorStreamer
 from hil.protocol import COORD_FMT
 from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
-from hil.plot import plot_predictions, plot_timing
-from hil.kpi import load_ground_truth, compute_kpi, print_kpi_report
+import numpy as np
+
+from hil.plot import plot_predictions, plot_timing, plot_velocity_xy
+from hil.kpi import (
+    load_ground_truth,
+    load_ground_truth_indoor,
+    compute_kpi,
+    print_kpi_report,
+    kalman_filter_velocity,
+    compute_velocity_gt,
+)
 
 if __name__ == "__main__":
 
@@ -53,7 +63,49 @@ if __name__ == "__main__":
         type=str,
         metavar="PATH",
         required=True,
-        help="Path to a UAV split folder (e.g. /path/to/alto-dataset/UAV/Train).",
+        help=(
+            "Path to the dataset folder.  "
+            "For UAV (--dataset-type uav): a split folder containing "
+            "query_images/ and reference_images/.  "
+            "For indoor (--dataset-type indoor): the nav-cam folder "
+            "containing img/ and nav_cam_timestamps.csv "
+            "(e.g. /path/to/insane-dataset/indoor_1_nav_cam)."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-type",
+        type=str,
+        choices=["uav", "indoor"],
+        default="uav",
+        help=(
+            "Dataset type.  "
+            "'uav'    – UAV split (default).  "
+            "'indoor' – INSANE indoor nav-cam dataset."
+        ),
+    )
+    parser.add_argument(
+        "--sensors-root",
+        type=str,
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to the sensors folder for the indoor dataset "
+            "(e.g. /path/to/insane-dataset/indoor_1_sensors).  "
+            "When omitted the path is auto-derived from --data-root by "
+            "replacing the trailing '_nav_cam' suffix with '_sensors'.  "
+            "Only used when --dataset-type indoor."
+        ),
+    )
+    parser.add_argument(
+        "--start-frame",
+        type=int,
+        metavar="N",
+        default=1000,
+        help=(
+            "1-based frame number at which to start streaming "
+            "(default: 1000).  Frames before this number are skipped.  "
+            "Only applied when --dataset-type indoor."
+        ),
     )
     parser.add_argument(
         "--plot",
@@ -67,7 +119,7 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="After the run, compute and print accuracy KPI (MAE, RMSE, R², …) comparing "
-        "the STM32's tx/ty/theta estimates to ground truth derived from query.csv.",
+        "the STM32's tx/ty/theta estimates to ground truth.",
     )
     parser.add_argument(
         "--plot-kpi",
@@ -89,7 +141,7 @@ if __name__ == "__main__":
         "--hfov",
         type=float,
         metavar="DEG",
-        default=92.0,
+        default=101.0,
         help="Camera horizontal field of view in degrees (default: 60).  Used to "
         "auto-compute the GSD from altitude when --gsd is not provided.",
     )
@@ -97,7 +149,7 @@ if __name__ == "__main__":
         "--vfov",
         type=float,
         metavar="DEG",
-        default=75,
+        default=114,
         help="Camera vertical field of view in degrees.  Defaults to --hfov (square "
         "sensor).  Provide this when VFOV differs from HFOV so that the ty (North) "
         "ground truth uses the correct per-axis GSD.",
@@ -123,7 +175,14 @@ if __name__ == "__main__":
     data_root: str = args.data_root
     print("Entering ", data_root)
 
-    streamer: DatasetStreamer = UAVStreamer(data_root, None)
+    dataset_type: str = args.dataset_type
+
+    if dataset_type == "indoor":
+        streamer: DatasetStreamer = IndoorStreamer(
+            data_root, None, start_frame=args.start_frame
+        )
+    else:
+        streamer = UAVStreamer(data_root, None)
 
     port = find_stm32_port()
     ser = serial.Serial(port, timeout=1000)
@@ -149,7 +208,7 @@ if __name__ == "__main__":
         [] if (args.kpi or args.plot_kpi) else None
     )
 
-    print("Starting UAV clip playback...")
+    print("Starting clip playback...")
     print("Press 'q' + Enter at any time to stop streaming early.")
 
     frame_queue: "queue.Queue[Optional[FrameItem]]" = queue.Queue(maxsize=0)
@@ -423,9 +482,36 @@ if __name__ == "__main__":
         print("")
         print("Computing KPI…")
         try:
-            tx_gt, ty_gt, theta_gt, gsd_x, gsd_y = load_ground_truth(
-                data_root, gsd_m_per_px=args.gsd, hfov_deg=args.hfov, vfov_deg=args.vfov
-            )
+            gt_px: "np.ndarray | None" = None
+            gt_py: "np.ndarray | None" = None
+
+            if dataset_type == "indoor":
+                # Derive sensors_root from data_root when not supplied.
+                sensors_root: str = args.sensors_root or data_root.replace(
+                    "_nav_cam", "_sensors"
+                )
+                (
+                    tx_gt,
+                    ty_gt,
+                    theta_gt,
+                    gsd_x,
+                    gsd_y,
+                    gt_px,
+                    gt_py,
+                ) = load_ground_truth_indoor(
+                    data_root,
+                    sensors_root=sensors_root,
+                    gsd_m_per_px=args.gsd,
+                    hfov_deg=args.hfov,
+                    vfov_deg=args.vfov,
+                )
+            else:
+                tx_gt, ty_gt, theta_gt, gsd_x, gsd_y = load_ground_truth(
+                    data_root,
+                    gsd_m_per_px=args.gsd,
+                    hfov_deg=args.hfov,
+                    vfov_deg=args.vfov,
+                )
 
             frame_numbers = [fm[0] for fm in frame_meta_list]
             tx_pred = [fm[1] for fm in frame_meta_list]
@@ -452,6 +538,43 @@ if __name__ == "__main__":
                     tx_gt,
                     ty_gt,
                     theta_gt,
+                )
+
+            # ------------------------------------------------------------------
+            # Kalman-filter velocity estimation vs. ground-truth velocity
+            # Available for both UAV and indoor datasets.
+            # ------------------------------------------------------------------
+            if args.plot_kpi and len(frame_numbers) > 1:
+                print("")
+                print("Running Kalman filter for velocity estimation…")
+
+                vx_kf, vy_kf = kalman_filter_velocity(
+                    frame_numbers, tx_pred, ty_pred, gsd_x, gsd_y
+                )
+
+                # Ground-truth velocity in m/frame, aligned with frame_numbers.
+                vx_gt_aligned, vy_gt_aligned = compute_velocity_gt(
+                    frame_numbers, tx_gt, ty_gt, gsd_x, gsd_y
+                )
+
+                # Report per-axis velocity MAE (valid GT frames only).
+                valid_mask = ~np.isnan(vx_gt_aligned)
+                if valid_mask.any():
+                    vx_mae = float(
+                        np.mean(np.abs(vx_kf[valid_mask] - vx_gt_aligned[valid_mask]))
+                    )
+                    vy_mae = float(
+                        np.mean(np.abs(vy_kf[valid_mask] - vy_gt_aligned[valid_mask]))
+                    )
+                    print(f"  KF velocity MAE — vx: {vx_mae:.4f} m/frame")
+                    print(f"  KF velocity MAE — vy: {vy_mae:.4f} m/frame")
+
+                plot_velocity_xy(
+                    frame_numbers,
+                    vx_kf,
+                    vy_kf,
+                    vx_gt_aligned,
+                    vy_gt_aligned,
                 )
         except Exception as exc:
             print(f"KPI computation failed: {exc}")
