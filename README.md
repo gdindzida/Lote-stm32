@@ -54,6 +54,24 @@ source venv/bin/activate
 pip install -r tools/requirements.txt
 ```
 
+### Download the UAV dataset
+
+The HIL test uses the **ALTO UAV dataset** ([MetaSLAM/ALTO](https://github.com/MetaSLAM/ALTO)).
+
+1. Visit the [ALTO GitHub page](https://github.com/MetaSLAM/ALTO) and follow the dataset request / download instructions to obtain the dataset.
+2. Extract the archive so you have a folder layout like:
+   ```
+   alto-dataset/
+   └── UAV/
+       ├── Train/
+       │   ├── query_images/
+       │   └── reference_images/
+       │       └── offset_0_None/
+       ├── Val/
+       └── Test/
+   ```
+3. Pass the path to one of the split folders (e.g. `UAV/Train`) as `--data-root` when running the HIL script.
+
 ### Connect the board
 
 Plug the STM32 board via USB. The `start_hil.sh` script auto-detects the STM32 CDC serial port by its USB vendor ID (0x0483) — no manual port configuration needed.
@@ -63,14 +81,14 @@ Plug the STM32 board via USB. The `start_hil.sh` script auto-detects the STM32 C
 Use the provided launcher script from the repo root. It sources the virtual environment and sets up the Python path automatically:
 
 ```bash
-./tools/start_hil.sh --data-root <path/to/kitti/drive_folder> [OPTIONS]
+./tools/start_hil.sh --data-root <path/to/UAV/split_folder> [OPTIONS]
 ```
 
-The `--data-root` must point to a KITTI drive folder that contains `image_00/data/` and `image_01/data/` subdirectories, e.g.:
+The `--data-root` must point to one of the UAV dataset split folders (e.g. `Train`, `Val`) that contains `query_images/` and `reference_images/offset_0_None/` subdirectories, e.g.:
 
 ```bash
 ./tools/start_hil.sh \
-  --data-root ../datasets/kitti/2011_09_26_drive_0001_sync \
+  --data-root ../alto-dataset/UAV/Train \
   --write-freq 6
 ```
 
@@ -78,7 +96,7 @@ The `--data-root` must point to a KITTI drive folder that contains `image_00/dat
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--data-root PATH` | string | *(required)* | Path to the KITTI drive folder |
+| `--data-root PATH` | string | *(required)* | Path to a UAV split folder (e.g. `UAV/Train`) |
 | `--write-freq HZ` | float | `30` | Frame send rate to the STM32 (Hz) |
 | `--playback DELAY_MS` | int | — | After the run, replay frames with a fixed delay (ms) between each |
 | `--playback-realtime` | flag | — | After the run, replay frames using the original inter-frame timings |
@@ -88,7 +106,7 @@ The `--data-root` must point to a KITTI drive folder that contains `image_00/dat
 Run at 6 Hz and replay with original timings:
 ```bash
 ./tools/start_hil.sh \
-  --data-root ../datasets/kitti/2011_09_26_drive_0001_sync \
+  --data-root ../alto-dataset/UAV/Train \
   --write-freq 6 \
   --playback-realtime
 ```
@@ -96,8 +114,10 @@ Run at 6 Hz and replay with original timings:
 Run at maximum throughput with a 100 ms fixed playback delay:
 ```bash
 ./tools/start_hil.sh \
-  --data-root ../datasets/kitti/2011_09_26_drive_0001_sync \
+  --data-root ../alto-dataset/UAV/Train \
   --playback 100
 ```
+
+Press **Q** + Enter during streaming to stop early and proceed to playback.
 
 Press **Q** during playback to quit.

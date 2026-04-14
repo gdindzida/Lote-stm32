@@ -2,6 +2,7 @@ import os
 import queue
 import statistics
 import struct
+import sys
 import threading
 import time
 import argparse
@@ -12,7 +13,7 @@ import cv2
 import serial
 
 from hil.frames import FrameItem, FrameRecord
-from hil.kitti import KittiStreamer
+from hil.uav import UAVStreamer
 from hil.protocol import COORD_FMT
 from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
@@ -48,7 +49,7 @@ if __name__ == "__main__":
         type=str,
         metavar="PATH",
         required=True,
-        help="Path to the KITTI drive folder (e.g. data/2011_09_26_drive_0001_sync).",
+        help="Path to a UAV split folder (e.g. /path/to/alto-dataset/UAV/Train).",
     )
     args = parser.parse_args()
 
@@ -61,7 +62,7 @@ if __name__ == "__main__":
     data_root: str = args.data_root
     print("Entering ", data_root)
 
-    streamer: DatasetStreamer = KittiStreamer(data_root, None)
+    streamer: DatasetStreamer = UAVStreamer(data_root, None)
 
     port = find_stm32_port()
     ser = serial.Serial(port, timeout=10)
@@ -79,13 +80,28 @@ if __name__ == "__main__":
     peak_memory: List[float] = [0.0, 0.0]  # [stack, heap]
     recorded_frames: List[FrameRecord] = []
 
-    print("Starting KITTI clip playback...")
+    print("Starting UAV clip playback...")
+    print("Press 'q' + Enter at any time to stop streaming early.")
 
-    # Shared queue: writer pushes FrameItem entries; None sentinel signals completion
     frame_queue: "queue.Queue[Optional[FrameItem]]" = queue.Queue(maxsize=0)
     error_event = threading.Event()
+    stop_event = threading.Event()
 
     start_time = time.time()
+
+    def keyboard_listener_fn() -> None:
+        """Sets stop_event when the user types 'q' + Enter."""
+        try:
+            while not stop_event.is_set() and not error_event.is_set():
+                line = sys.stdin.readline()
+                if not line:  # EOF (e.g. piped input ended)
+                    break
+                if line.strip().lower() == "q":
+                    print("\nStopping early (q pressed)...")
+                    stop_event.set()
+                    break
+        except OSError:
+            pass
 
     writer = threading.Thread(
         target=writer_thread_fn,
@@ -98,6 +114,7 @@ if __name__ == "__main__":
             do_record,
             loop_times,
             error_event,
+            stop_event,
         ),
         daemon=True,
     )
@@ -113,15 +130,24 @@ if __name__ == "__main__":
             recorded_frames,
             peak_memory,
             error_event,
+            streamer.total,
         ),
+        daemon=True,
+    )
+
+    keyboard = threading.Thread(
+        target=keyboard_listener_fn,
+        name="kbd-listener",
         daemon=True,
     )
 
     writer.start()
     reader.start()
+    keyboard.start()
 
     writer.join()
     reader.join()
+    stop_event.set()  # unblock keyboard listener if stream finished naturally
 
     if error_event.is_set():
         print("An error occurred during serial communication. Aborting.")

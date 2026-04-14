@@ -20,6 +20,7 @@ def writer_thread_fn(
     do_record: bool,
     loop_times: List[float],
     error_event: threading.Event,
+    stop_event: threading.Event,
 ):
     """Reads frames from the streamer, writes them to serial, and enqueues frame data for the reader."""
     period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
@@ -59,7 +60,7 @@ def writer_thread_fn(
     frame_queue.put(FrameItem(small_img.copy(), left_img.copy(), frame_write_time))
 
     # --- Subsequent frames ---
-    while streamer.has_next():
+    while streamer.has_next() and not stop_event.is_set():
         result = streamer.next()
         if result is None:
             print("Images are None!")
@@ -105,18 +106,20 @@ def reader_thread_fn(
     recorded_frames: List[FrameRecord],
     peak_memory: List[float],  # [peak_stack, peak_heap]
     error_event: threading.Event,
+    total: int,
 ):
     """Reads serial responses and collects statistics / records frames."""
     iter: int = 0
     while True:
-        print("Current iter: ", iter)
-        iter += 1
         # Get the matching frame entry from the writer
         item = frame_queue.get()
 
         if item is None:
             # None sentinel: no more frames; reader is done
             break
+
+        iter += 1
+        print(f"Current iter: {iter} / {total}")
 
         small_img = item.small_img
         left_img = item.left_img
