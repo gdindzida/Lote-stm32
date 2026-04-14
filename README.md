@@ -8,10 +8,6 @@ Install following vscode extensions: clangd, pylance, c/c++
 sudo apt install gcc-arm-none-eabi cmake ninja-build dfu-util clangd git
 ```
 
-```
-git submodule update --init --recursive
-```
-
 ## Build
 
 configure
@@ -19,12 +15,6 @@ configure
 cmake -B build-debug -G Ninja -DCMAKE_TOOLCHAIN_FILE=tools/arm-none-eabi-toolchain.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 cmake --build build-debug
-```
-
-## Update submodules
-
-```
-git submodule update --init --recursive
 ```
 
 ## Tools

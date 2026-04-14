@@ -3,3 +3,6 @@ compile_commands.json
 build*/
 venv/
 .todo/
+__pycache__/
+*.pyc
+*.pyo
