@@ -1,6 +1,3 @@
-[submodule "modules/gaspar"]
-	path = modules/gaspar
-	url = https://github.com/gdindzida/gaspar.git
 [submodule "modules/baltazar"]
 	path = modules/baltazar
 	url = https://github.com/gdindzida/baltazar.git
