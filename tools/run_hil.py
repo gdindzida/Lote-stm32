@@ -1,357 +1,22 @@
-from abc import ABC, abstractmethod
-from glob import glob
-from typing import List, Optional, Tuple, Any
-import numpy as np
 import os
+import queue
 import statistics
+import struct
+import threading
+import time
 import argparse
-
-
-# ---------------------------------------------------------------------------
-# Dataset streamer base classes (inlined from modules/gaspar)
-# ---------------------------------------------------------------------------
-
-
-class DatasetStreamerAdapter(ABC):
-    @abstractmethod
-    def process(
-        self,
-        input: Optional[
-            Tuple[np.ndarray[Any, Any] | None, np.ndarray[Any, Any] | None]
-        ],
-    ):
-        """Processes next resource from dataset streamer."""
-        pass
-
-
-class DatasetStreamer(ABC):
-    @abstractmethod
-    def next(
-        self,
-    ) -> Optional[Tuple[np.ndarray[Any, Any] | None, np.ndarray[Any, Any] | None]]:
-        """Return the next resource. Returns None when dataset is exhausted."""
-        pass
-
-    @abstractmethod
-    def has_next(self) -> bool:
-        """Returns True if it has next resource."""
-        pass
-
-    @abstractmethod
-    def reset(self) -> None:
-        """Restart streaming from the beginning."""
-        pass
-
-    @abstractmethod
-    def run(self) -> None:
-        """Runs stream."""
-        pass
-
-
-# ---------------------------------------------------------------------------
-# KITTI streamer (inlined from modules/gaspar)
-# ---------------------------------------------------------------------------
-
-
-class KittiStreamer(DatasetStreamer):
-    def __init__(
-        self,
-        data_root: str,
-        dataset_streamer_adapter: DatasetStreamerAdapter | None,
-    ) -> None:
-        """data_root: top folder of 2011_09_26 raw KITTI data."""
-        self.left_folder: str = os.path.join(data_root, "image_00/data")
-        self.right_folder: str = os.path.join(data_root, "image_01/data")
-
-        print("cwd: ", os.getcwd())
-        print("left folder : ", self.left_folder)
-        print("right folder : ", self.right_folder)
-
-        self.left_images: list[str] = sorted(
-            glob(os.path.join(self.left_folder, "*.png"))
-        )
-        self.right_images: list[str] = sorted(
-            glob(os.path.join(self.right_folder, "*.png"))
-        )
-
-        print("Found ", len(self.left_images), " images")
-
-        if len(self.left_images) != len(self.right_images):
-            raise ValueError("Left and right image counts do not match!")
-
-        self.index: int = 0
-        self.total: int = len(self.left_images)
-        print("Found ", self.total, " images")
-
-        self.dataset_streamer_adapter: DatasetStreamerAdapter | None = (
-            dataset_streamer_adapter
-        )
-
-    def reset(self) -> None:
-        self.index = 0
-
-    def has_next(self) -> bool:
-        return self.index < self.total
-
-    def next(
-        self,
-    ) -> Optional[Tuple[np.ndarray[Any, Any] | None, np.ndarray[Any, Any] | None]]:
-        if not self.has_next():
-            return None
-
-        img_left: np.ndarray | None = cv2.imread(
-            self.left_images[self.index], cv2.IMREAD_GRAYSCALE
-        )
-        img_right: np.ndarray | None = cv2.imread(
-            self.right_images[self.index], cv2.IMREAD_GRAYSCALE
-        )
-
-        self.index += 1
-
-        return img_left, img_right
-
-    def run(self) -> None:
-        """Runs stream in given frequency in Hz."""
-        if self.dataset_streamer_adapter is None:
-            print("Error: Dataset streamer adapter is None.")
-            return
-
-        while self.has_next():
-            result = self.next()
-            if result is None:
-                print("Images are None!")
-                continue
-
-            left_img, right_img = result
-
-            if left_img is None:
-                print("Left image is None!")
-                continue
-
-            if right_img is None:
-                print("Right image is None!")
-                continue
-
-            self.dataset_streamer_adapter.process((left_img, right_img))
-
+from typing import List, Optional
 
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
 import cv2
-import time
 import serial
-import serial.tools.list_ports
-import struct
-import threading
-import queue
-from dataclasses import dataclass
 
-MAGIC = 0xABCD
-HEADER_FMT = "<HH"
-METADATA_FMT = "<IhhHfffff"
-COORD_FMT = "BB"
-
-
-@dataclass
-class Metadata:
-    process_elapsed_time_ms: int
-    u_sum: int
-    v_sum: int
-    num_points: int
-    stack_mem_usage: float
-    heap_mem_usage: float
-    tx: float
-    ty: float
-    theta: float
-
-
-@dataclass
-class Coordinate:
-    x: int
-    y: int
-
-
-def find_stm32_port() -> str:
-    """Auto-detect the STM32 CDC port (VID 0x0483)."""
-    for p in serial.tools.list_ports.comports():
-        if p.vid == 0x0483:
-            return p.device
-    raise RuntimeError("STM32 CDC port not found")
-
-
-@dataclass
-class FrameRecord:
-    small_img: np.ndarray
-    left_img: np.ndarray
-    payload: bytes
-    meta: Metadata
-    meta_size: int
-    timestamp: float = 0.0
-
-
-@dataclass
-class _FrameItem:
-    """Data pushed into the inter-thread queue by the writer for each sent frame."""
-
-    small_img: np.ndarray
-    left_img: np.ndarray
-    write_time: float
-
-
-def writer_thread_fn(
-    ser: serial.Serial,
-    streamer: DatasetStreamer,
-    frame_queue: "queue.Queue[Optional[_FrameItem]]",
-    write_freq_hz: Optional[float],
-    do_record: bool,
-    loop_times: List[float],
-    error_event: threading.Event,
-):
-    """Reads frames from the streamer, writes them to serial, and enqueues frame data for the reader."""
-    period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
-
-    # --- First frame (sent before the main loop) ---
-    result = streamer.next()
-    if result is None:
-        print("Images are None!")
-        error_event.set()
-        frame_queue.put(None)
-        return
-
-    left_img, right_img = result
-
-    if left_img is None:
-        print("Left image is None!")
-        error_event.set()
-        frame_queue.put(None)
-        return
-
-    if right_img is None:
-        print("Right image is None!")
-        error_event.set()
-        frame_queue.put(None)
-        return
-
-    small_img = cv2.resize(left_img, (128, 64), interpolation=cv2.INTER_AREA)
-    print(left_img.shape)
-    print(small_img.shape)
-    img_data = small_img.tobytes()
-
-    loop_time = time.time()
-    frame_write_time = loop_time
-
-    ser.write(img_data)
-    # Enqueue the frame images so the reader can build a FrameRecord
-    frame_queue.put(_FrameItem(small_img.copy(), left_img.copy(), frame_write_time))
-
-    # --- Subsequent frames ---
-    while streamer.has_next():
-        result = streamer.next()
-        if result is None:
-            print("Images are None!")
-            continue
-
-        left_img, right_img = result
-
-        if left_img is None:
-            print("Left image is None!")
-            continue
-
-        if right_img is None:
-            print("Right image is None!")
-            continue
-
-        small_img = cv2.resize(left_img, (128, 64), interpolation=cv2.INTER_AREA)
-        img_data = small_img.tobytes()
-
-        # Frequency throttling: sleep for the remainder of the period
-        if period > 0.0:
-            elapsed_since_last = time.time() - frame_write_time
-            sleep_time = period - elapsed_since_last
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-        new_loop_time = time.time()
-        loop_times.append(new_loop_time - loop_time)
-        loop_time = new_loop_time
-
-        frame_write_time = time.time()
-        ser.write(img_data)
-        frame_queue.put(_FrameItem(small_img.copy(), left_img.copy(), frame_write_time))
-
-    # Signal the reader that no more frames will be written (None = sentinel)
-    frame_queue.put(None)
-
-
-def reader_thread_fn(
-    ser: serial.Serial,
-    frame_queue: "queue.Queue[Optional[_FrameItem]]",
-    do_record: bool,
-    process_elapsed_times: List[float],
-    recorded_frames: List[FrameRecord],
-    peak_memory: List[float],  # [peak_stack, peak_heap]
-    error_event: threading.Event,
-):
-    """Reads serial responses and collects statistics / records frames."""
-    iter: int = 0
-    while True:
-        print("Current iter: ", iter)
-        iter += 1
-        # Get the matching frame entry from the writer
-        item = frame_queue.get()
-
-        if item is None:
-            # None sentinel: no more frames; reader is done
-            break
-
-        small_img = item.small_img
-        left_img = item.left_img
-
-        # Read header
-        header_bytes = ser.read(struct.calcsize(HEADER_FMT))
-        if len(header_bytes) < struct.calcsize(HEADER_FMT):
-            print("Reader: timeout waiting for header")
-            error_event.set()
-            break
-
-        magic, length = struct.unpack(HEADER_FMT, header_bytes)
-        print("Size of header: ", len(header_bytes))
-        if magic != MAGIC:
-            print(f"Reader: bad magic: {hex(magic)}")
-            error_event.set()
-            break
-
-        payload = ser.read(length)
-        if len(payload) < length:
-            print("Reader: timeout waiting for payload")
-            error_event.set()
-            break
-
-        print("Got payload of size: ", len(payload))
-
-        meta_size = struct.calcsize(METADATA_FMT)
-        meta_raw = struct.unpack(METADATA_FMT, payload[:meta_size])
-        meta = Metadata(*meta_raw)
-
-        process_elapsed_times.append(meta.process_elapsed_time_ms)
-        peak_memory[0] = meta.stack_mem_usage
-        peak_memory[1] = meta.heap_mem_usage
-        print("Got this many valid points: ", meta.num_points)
-        print("u_sum: ", meta.u_sum, ", v_sum: ", meta.v_sum)
-        print("tx: ", meta.tx, ", ty: ", meta.ty, ", theta: ", meta.theta)
-        print("")
-
-        if do_record:
-            recorded_frames.append(
-                FrameRecord(
-                    small_img=small_img,
-                    left_img=left_img,
-                    payload=payload,
-                    meta=meta,
-                    meta_size=meta_size,
-                    timestamp=time.time(),
-                )
-            )
-
+from hil.frames import FrameItem, FrameRecord
+from hil.kitti import KittiStreamer
+from hil.protocol import COORD_FMT
+from hil.stm32 import find_stm32_port
+from hil.streamer import DatasetStreamer
+from hil.threads import reader_thread_fn, writer_thread_fn
 
 if __name__ == "__main__":
 
@@ -378,6 +43,13 @@ if __name__ == "__main__":
         help="Frequency (in Hz) at which frames are written to the serial port. "
         "Omit for maximum throughput (no throttling).",
     )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        metavar="PATH",
+        required=True,
+        help="Path to the KITTI drive folder (e.g. data/2011_09_26_drive_0001_sync).",
+    )
     args = parser.parse_args()
 
     do_record = args.playback is not None or args.playback_realtime
@@ -386,7 +58,7 @@ if __name__ == "__main__":
     if write_freq_hz is not None and write_freq_hz <= 0:
         parser.error("--write-freq must be a positive number")
 
-    data_root: str = "modules/gaspar/data/2011_09_26_drive_0001_sync"
+    data_root: str = args.data_root
     print("Entering ", data_root)
 
     streamer: DatasetStreamer = KittiStreamer(data_root, None)
@@ -409,8 +81,8 @@ if __name__ == "__main__":
 
     print("Starting KITTI clip playback...")
 
-    # Shared queue: writer pushes _FrameItem entries; None sentinel signals completion
-    frame_queue: "queue.Queue[Optional[_FrameItem]]" = queue.Queue(maxsize=0)
+    # Shared queue: writer pushes FrameItem entries; None sentinel signals completion
+    frame_queue: "queue.Queue[Optional[FrameItem]]" = queue.Queue(maxsize=0)
     error_event = threading.Event()
 
     start_time = time.time()
@@ -578,5 +250,4 @@ if __name__ == "__main__":
             if key == ord("q"):  # press Q to quit
                 break
 
-    # streamer.run()
     cv2.destroyAllWindows()
