@@ -18,6 +18,7 @@ from hil.protocol import COORD_FMT
 from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
+from hil.plot import plot_timing
 
 if __name__ == "__main__":
 
@@ -51,6 +52,13 @@ if __name__ == "__main__":
         required=True,
         help="Path to a UAV split folder (e.g. /path/to/alto-dataset/UAV/Train).",
     )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        default=False,
+        help="After the run, display a timing bar chart (loop time / process time per frame, "
+        "with markers for missed frames).",
+    )
     args = parser.parse_args()
 
     do_record = args.playback is not None or args.playback_realtime
@@ -79,11 +87,17 @@ if __name__ == "__main__":
     process_elapsed_times: List[float] = []
     peak_memory: List[float] = [0.0, 0.0]  # [stack, heap]
     recorded_frames: List[FrameRecord] = []
+    missed_frames: List[int] = [0]  # [missed_frame_count]
+    missed_frame_times: List[float] = []  # absolute timestamps of each missed frame
 
     print("Starting UAV clip playback...")
     print("Press 'q' + Enter at any time to stop streaming early.")
 
     frame_queue: "queue.Queue[Optional[FrameItem]]" = queue.Queue(maxsize=0)
+    # Models the STM32's 2-frame receive buffer.  The writer acquires a slot
+    # before each transmission; the reader releases it only after the MCU
+    # serial response has been fully received.
+    frame_buffer_sem = threading.Semaphore(2)
     error_event = threading.Event()
     stop_event = threading.Event()
 
@@ -113,6 +127,9 @@ if __name__ == "__main__":
             write_freq_hz,
             do_record,
             loop_times,
+            missed_frames,
+            missed_frame_times,
+            frame_buffer_sem,
             error_event,
             stop_event,
         ),
@@ -129,6 +146,7 @@ if __name__ == "__main__":
             process_elapsed_times,
             recorded_frames,
             peak_memory,
+            frame_buffer_sem,
             error_event,
             streamer.total,
         ),
@@ -162,6 +180,7 @@ if __name__ == "__main__":
     elapsed_time = time.time() - start_time
     print("")
     print("Total elapsed time(s): ", elapsed_time)
+    print("Desired freq: ", write_freq_hz)
     if loop_times:
         print("Avg time(ms): ", 1000 * elapsed_time / (len(loop_times) + 1))
 
@@ -209,6 +228,17 @@ if __name__ == "__main__":
     print("Peak stack memory usage: ", 100 * peak_stack_memory, "%")
     print("Peak heap memory usage: ", 100 * peak_heap_memory, "%")
 
+    total_sent = len(loop_times) + 1  # +1 for the first frame sent before the loop
+    total_attempted = total_sent + missed_frames[0]
+    missed_pct = (
+        100.0 * missed_frames[0] / total_attempted if total_attempted > 0 else 0.0
+    )
+    print("")
+    print("Missed (skipped) frames:  ", missed_frames[0])
+    print("Total frames attempted:   ", total_attempted)
+    print("Total frames sent:        ", total_sent)
+    print(f"Missed frames rate:        {missed_pct:.1f}%")
+
     if args.playback is not None or args.playback_realtime:
         print("")
         if args.playback_realtime:
@@ -236,40 +266,6 @@ if __name__ == "__main__":
             scale_x = frame.left_img.shape[1] / 128.0
             scale_y = frame.left_img.shape[0] / 64.0
 
-            if frame.meta.num_points > 0:
-                coord_size = struct.calcsize(COORD_FMT)
-                offset = frame.meta_size
-                # print("Got this many points: ", frame.meta.num_points)
-                # for i in range(frame.meta.num_points):
-                #     x, y = struct.unpack(
-                #         COORD_FMT, frame.payload[offset : offset + coord_size]
-                #     )
-                #     offset += coord_size
-                #     x, y = int(x) & 0xFF, int(y) & 0xFF  # interpret as uint8_t (0–255)
-                #     # print(f"  point[{i}]: x={y}, y={x}")
-
-                #     # Draw on small image (coordinates are in small image space)
-                #     cv2.circle(
-                #         small_annotated,
-                #         (y, x),
-                #         radius=2,
-                #         color=(0, 255, 0),
-                #         thickness=-1,
-                #     )
-
-                #     # Scale up and draw on big image
-                #     big_x = int(x * scale_y)
-                #     big_y = int(y * scale_x)
-                #     cv2.circle(
-                #         big_annotated,
-                #         (big_y, big_x),
-                #         radius=5,
-                #         color=(0, 255, 0),
-                #         thickness=-1,
-                #     )
-            else:
-                print("No points!")
-
             cv2.imshow("Left", big_annotated)
             cv2.imshow("Small left", small_annotated)
             key = cv2.waitKey(frame_delay_ms)
@@ -277,3 +273,6 @@ if __name__ == "__main__":
                 break
 
     cv2.destroyAllWindows()
+
+    if args.plot:
+        plot_timing(loop_times, process_elapsed_times, missed_frame_times, start_time)

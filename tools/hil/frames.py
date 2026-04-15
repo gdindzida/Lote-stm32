@@ -24,3 +24,4 @@ class FrameItem:
     small_img: np.ndarray
     left_img: np.ndarray
     write_time: float
+    frame_number: int

@@ -20,4 +20,4 @@ source "${VENV_DIR}/bin/activate"
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
 # Forward all arguments to run_hil.py
-python "${SCRIPT_DIR}/run_hil.py" "$@"
+python "${SCRIPT_DIR}/hil/run_hil.py" "$@"
