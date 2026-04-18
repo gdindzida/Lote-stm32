@@ -20,7 +20,7 @@ from hil.protocol import COORD_FMT
 from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
-from hil.plot import plot_timing
+from hil.plot import plot_predictions, plot_timing
 from hil.kpi import load_ground_truth, compute_kpi, print_kpi_report
 
 if __name__ == "__main__":
@@ -68,6 +68,13 @@ if __name__ == "__main__":
         default=False,
         help="After the run, compute and print accuracy KPI (MAE, RMSE, R², …) comparing "
         "the STM32's tx/ty/theta estimates to ground truth derived from query.csv.",
+    )
+    parser.add_argument(
+        "--plot-kpi",
+        action="store_true",
+        default=False,
+        help="After the run, display a timeseries plot of tx, ty and theta "
+        "(predicted vs. ground truth).  Implies --kpi.",
     )
     parser.add_argument(
         "--gsd",
@@ -127,9 +134,9 @@ if __name__ == "__main__":
     recorded_frames: List[FrameRecord] = []
     missed_frames: List[int] = [0]  # [missed_frame_count]
     missed_frame_times: List[float] = []  # absolute timestamps of each missed frame
-    # (frame_number, tx, ty, theta) per received frame — populated only when --kpi
+    # (frame_number, tx, ty, theta) per received frame — populated when --kpi or --plot-kpi
     frame_meta_list: "List[tuple[int, float, float, float]] | None" = (
-        [] if args.kpi else None
+        [] if (args.kpi or args.plot_kpi) else None
     )
 
     print("Starting UAV clip playback...")
@@ -334,7 +341,8 @@ if __name__ == "__main__":
             write_freq_hz,
         )
 
-    if args.kpi and frame_meta_list:
+    do_kpi = args.kpi or args.plot_kpi
+    if do_kpi and frame_meta_list:
         print("")
         print("Computing KPI…")
         try:
@@ -357,7 +365,18 @@ if __name__ == "__main__":
                 theta_gt,
             )
             print_kpi_report(kpi_result, gsd_x, gsd_y)
+
+            if args.plot_kpi:
+                plot_predictions(
+                    frame_numbers,
+                    tx_pred,
+                    ty_pred,
+                    theta_pred,
+                    tx_gt,
+                    ty_gt,
+                    theta_gt,
+                )
         except Exception as exc:
             print(f"KPI computation failed: {exc}")
-    elif args.kpi:
+    elif do_kpi:
         print("KPI requested but no frames were successfully received — skipping.")

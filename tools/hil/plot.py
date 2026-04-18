@@ -1,4 +1,7 @@
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 def plot_timing(
@@ -206,5 +209,131 @@ def plot_timing(
     ax.set_ylim(bottom=0)
 
     ax.legend(loc="upper right")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_predictions(
+    frame_numbers: List[int],
+    tx_pred: List[float],
+    ty_pred: List[float],
+    theta_pred: List[float],
+    tx_gt: "np.ndarray",
+    ty_gt: "np.ndarray",
+    theta_gt: "np.ndarray",
+) -> None:
+    """Plot predicted vs. ground-truth tx, ty and theta over time.
+
+    Three vertically-stacked subplots share the same x-axis (frame index):
+
+    * **tx** (East translation, pixels)  — top panel.
+    * **ty** (North translation, pixels) — middle panel.
+    * **theta** (rotation, radians)      — bottom panel.
+
+    Each panel shows:
+
+    * Solid coloured line + circle markers — STM32 predictions.
+    * Dashed grey line + cross markers     — ground-truth values (NaN entries,
+      e.g. the last frame, are silently omitted).
+
+    Args:
+        frame_numbers: Dataset query-image index for each prediction.  Used as
+            the x-axis ("time") coordinate.
+        tx_pred:    Predicted East translation per frame (pixels).
+        ty_pred:    Predicted North translation per frame (pixels).
+        theta_pred: Predicted rotation per frame (radians).
+        tx_gt:      Ground-truth tx array indexed by dataset frame index.
+                    May contain NaN for frames without a successor.
+        ty_gt:      Ground-truth ty array (same shape / indexing as *tx_gt*).
+        theta_gt:   Ground-truth theta array (same shape / indexing as *tx_gt*).
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        print(
+            "matplotlib and numpy are required for --plot-kpi.  "
+            "Install them with: pip install matplotlib numpy"
+        )
+        return
+
+    if not frame_numbers:
+        print("Not enough data to generate a prediction plot (no frames recorded).")
+        return
+
+    gt_len = len(tx_gt)
+
+    # ------------------------------------------------------------------ #
+    # Build aligned ground-truth series (only frames with valid gt)       #
+    # ------------------------------------------------------------------ #
+    gt_frames: List[int] = []
+    gt_tx: List[float] = []
+    gt_ty: List[float] = []
+    gt_theta: List[float] = []
+    for fi in frame_numbers:
+        if fi < gt_len and not np.isnan(tx_gt[fi]):
+            gt_frames.append(fi)
+            gt_tx.append(float(tx_gt[fi]))
+            gt_ty.append(float(ty_gt[fi]))
+            gt_theta.append(float(theta_gt[fi]))
+
+    # ------------------------------------------------------------------ #
+    # Plot                                                                 #
+    # ------------------------------------------------------------------ #
+    fig, axes = plt.subplots(
+        3, 1, figsize=(max(12, len(frame_numbers) * 0.25), 10), sharex=True
+    )
+
+    _PRED_STYLE = dict(linewidth=1.4, marker="o", markersize=3, zorder=3)
+    _GT_STYLE = dict(
+        linewidth=1.2,
+        linestyle="--",
+        marker="x",
+        markersize=4,
+        color="dimgrey",
+        zorder=2,
+    )
+
+    # ---- tx ----
+    axes[0].plot(
+        frame_numbers, tx_pred, color="steelblue", label="tx predicted", **_PRED_STYLE
+    )
+    if gt_frames:
+        axes[0].plot(gt_frames, gt_tx, label="tx ground truth", **_GT_STYLE)
+    axes[0].set_ylabel("tx (px)")
+    axes[0].set_title("East translation (tx) — predicted vs. ground truth")
+    axes[0].legend(loc="upper right")
+    axes[0].grid(True, linestyle=":", alpha=0.5)
+
+    # ---- ty ----
+    axes[1].plot(
+        frame_numbers, ty_pred, color="tomato", label="ty predicted", **_PRED_STYLE
+    )
+    if gt_frames:
+        axes[1].plot(gt_frames, gt_ty, label="ty ground truth", **_GT_STYLE)
+    axes[1].set_ylabel("ty (px)")
+    axes[1].set_title("North translation (ty) — predicted vs. ground truth")
+    axes[1].legend(loc="upper right")
+    axes[1].grid(True, linestyle=":", alpha=0.5)
+
+    # ---- theta ----
+    axes[2].plot(
+        frame_numbers,
+        theta_pred,
+        color="mediumseagreen",
+        label="θ predicted",
+        **_PRED_STYLE,
+    )
+    if gt_frames:
+        axes[2].plot(gt_frames, gt_theta, label="θ ground truth", **_GT_STYLE)
+    axes[2].set_ylabel("theta (rad)")
+    axes[2].set_xlabel("Frame index")
+    axes[2].set_title("Rotation (theta) — predicted vs. ground truth")
+    axes[2].legend(loc="upper right")
+    axes[2].grid(True, linestyle=":", alpha=0.5)
+
+    fig.suptitle(
+        "HIL Predictions vs. Ground Truth — Timeseries", fontsize=13, fontweight="bold"
+    )
     plt.tight_layout()
     plt.show()
