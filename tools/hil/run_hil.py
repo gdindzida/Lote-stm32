@@ -12,7 +12,7 @@ os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
 import cv2
 import serial
 
-from hil.frames import FrameItem, FrameRecord
+from hil.frames import FrameItem, FrameRecord, IMG_SCALE_SIZE
 from hil.uav import UAVStreamer
 from hil.protocol import COORD_FMT
 from hil.stm32 import find_stm32_port
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     streamer: DatasetStreamer = UAVStreamer(data_root, None)
 
     port = find_stm32_port()
-    ser = serial.Serial(port, timeout=10)
+    ser = serial.Serial(port, timeout=1)
     print(f"Connected to {port}")
 
     if write_freq_hz is not None:
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     else:
         print("Write frequency: unlimited (max throughput)")
 
-    loop_times: List[float] = []
+    frame_write_times: List[float] = []
     process_elapsed_times: List[float] = []
     peak_memory: List[float] = [0.0, 0.0]  # [stack, heap]
     recorded_frames: List[FrameRecord] = []
@@ -126,7 +126,7 @@ if __name__ == "__main__":
             frame_queue,
             write_freq_hz,
             do_record,
-            loop_times,
+            frame_write_times,
             missed_frames,
             missed_frame_times,
             frame_buffer_sem,
@@ -167,6 +167,10 @@ if __name__ == "__main__":
     reader.join()
     stop_event.set()  # unblock keyboard listener if stream finished naturally
 
+    # Derive write-to-write intervals from the absolute timestamps collected by
+    # the writer.  This avoids any timing measurement inside the hot loop.
+    loop_times = [t2 - t1 for t1, t2 in zip(frame_write_times, frame_write_times[1:])]
+
     if error_event.is_set():
         print("An error occurred during serial communication. Aborting.")
         raise SystemExit(1)
@@ -182,7 +186,7 @@ if __name__ == "__main__":
     print("Total elapsed time(s): ", elapsed_time)
     print("Desired freq: ", write_freq_hz)
     if loop_times:
-        print("Avg time(ms): ", 1000 * elapsed_time / (len(loop_times) + 1))
+        print("Avg time(ms): ", 1000 * elapsed_time / len(frame_write_times))
 
         max_loop_time = 1000 * max(loop_times)
         min_loop_time = 1000 * min(loop_times)
@@ -228,7 +232,7 @@ if __name__ == "__main__":
     print("Peak stack memory usage: ", 100 * peak_stack_memory, "%")
     print("Peak heap memory usage: ", 100 * peak_heap_memory, "%")
 
-    total_sent = len(loop_times) + 1  # +1 for the first frame sent before the loop
+    total_sent = len(frame_write_times)
     total_attempted = total_sent + missed_frames[0]
     missed_pct = (
         100.0 * missed_frames[0] / total_attempted if total_attempted > 0 else 0.0
@@ -263,8 +267,8 @@ if __name__ == "__main__":
             small_annotated = cv2.cvtColor(frame.small_img.copy(), cv2.COLOR_GRAY2BGR)
             big_annotated = cv2.cvtColor(frame.left_img.copy(), cv2.COLOR_GRAY2BGR)
 
-            scale_x = frame.left_img.shape[1] / 128.0
-            scale_y = frame.left_img.shape[0] / 64.0
+            scale_x = frame.left_img.shape[1] / IMG_SCALE_SIZE[0]
+            scale_y = frame.left_img.shape[0] / IMG_SCALE_SIZE[1]
 
             cv2.imshow("Left", big_annotated)
             cv2.imshow("Small left", small_annotated)

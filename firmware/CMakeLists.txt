@@ -17,8 +17,13 @@ add_compile_options(
     -ffreestanding
     -Wall
     -Wextra
-    -Os
 )
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-Og -g3)
+else()
+    add_compile_options(-Os -g0)
+endif()
 
 add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>

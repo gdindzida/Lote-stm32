@@ -4,10 +4,9 @@ import threading
 import time
 from typing import List, Optional
 
-import cv2
 import serial
 
-from hil.frames import FrameItem, FrameRecord
+from hil.frames import FrameItem, FrameRecord, scale_image
 from hil.protocol import HEADER_FMT, MAGIC, METADATA_FMT, Metadata
 from hil.streamer import DatasetStreamer
 
@@ -18,7 +17,7 @@ def writer_thread_fn(
     frame_queue: "queue.Queue[Optional[FrameItem]]",
     write_freq_hz: Optional[float],
     do_record: bool,
-    loop_times: List[float],
+    frame_write_times: List[float],
     missed_frames: List[int],
     missed_frame_times: List[float],
     frame_buffer_sem: threading.Semaphore,
@@ -37,6 +36,10 @@ def writer_thread_fn(
     inter-thread queue pop.  Every skipped frame is counted in
     ``missed_frames[0]``; its absolute timestamp is appended to
     ``missed_frame_times``.
+
+    The absolute write timestamp of every successfully sent frame is appended to
+    ``frame_write_times``; loop-to-loop intervals can be derived from that list
+    after the run.
     """
     period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
 
@@ -64,17 +67,16 @@ def writer_thread_fn(
 
     frame_number: int = 0
 
-    small_img = cv2.resize(left_img, (128, 64), interpolation=cv2.INTER_AREA)
+    small_img = scale_image(left_img)
     print(left_img.shape)
     print(small_img.shape)
     img_data = small_img.tobytes()
 
-    loop_time = time.time()
-    frame_write_time = loop_time
-
     # Acquire one MCU buffer slot for the first frame (always available at start).
     frame_buffer_sem.acquire()
+    frame_write_time = time.time()
     ser.write(img_data)
+    frame_write_times.append(frame_write_time)
     # Enqueue the frame images so the reader can build a FrameRecord
     frame_queue.put(
         FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
@@ -99,7 +101,7 @@ def writer_thread_fn(
 
         frame_number += 1
 
-        small_img = cv2.resize(left_img, (128, 64), interpolation=cv2.INTER_AREA)
+        small_img = scale_image(left_img)
         img_data = small_img.tobytes()
 
         # Frequency throttling: sleep for the remainder of the period
@@ -121,17 +123,9 @@ def writer_thread_fn(
             frame_write_time = time.time()
             continue
 
-        # Update loop timing only when a frame is actually sent so that
-        # loop_times records write-to-write intervals exclusively.
-        # This also prevents loop_time from being reset on skipped frames,
-        # which would otherwise shorten the measured interval for the next
-        # sent frame.
-        new_loop_time = time.time()
-        loop_times.append(new_loop_time - loop_time)
-        loop_time = new_loop_time
-
         frame_write_time = time.time()
         ser.write(img_data)
+        frame_write_times.append(frame_write_time)
         frame_queue.put(
             FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
         )
@@ -180,9 +174,11 @@ def reader_thread_fn(
         header_bytes = ser.read(struct.calcsize(HEADER_FMT))
         if len(header_bytes) < struct.calcsize(HEADER_FMT):
             print("Reader: timeout waiting for header")
+            print("")
             frame_buffer_sem.release()
-            error_event.set()
-            break
+            continue
+            # error_event.set()
+            # break
 
         magic, length = struct.unpack(HEADER_FMT, header_bytes)
         print("Size of header: ", len(header_bytes))
@@ -199,6 +195,10 @@ def reader_thread_fn(
             error_event.set()
             break
 
+        # MCU has finished processing this frame — release its buffer slot so
+        # the writer knows it may send another frame.
+        frame_buffer_sem.release()
+
         print("Got payload of size: ", len(payload))
 
         meta_size = struct.calcsize(METADATA_FMT)
@@ -211,11 +211,9 @@ def reader_thread_fn(
         print("Got this many valid points: ", meta.num_points)
         print("u_sum: ", meta.u_sum, ", v_sum: ", meta.v_sum)
         print("tx: ", meta.tx, ", ty: ", meta.ty, ", theta: ", meta.theta)
+        print("Peak stack memory: ", meta.stack_mem_usage)
+        print("Heap mem usage: ", meta.heap_mem_usage)
         print("")
-
-        # MCU has finished processing this frame — release its buffer slot so
-        # the writer knows it may send another frame.
-        frame_buffer_sem.release()
 
         if do_record:
             recorded_frames.append(

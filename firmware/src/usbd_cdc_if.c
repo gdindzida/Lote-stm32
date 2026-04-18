@@ -1,5 +1,7 @@
 #include "usbd_cdc_if.h"
 #include "app_types.h"
+#include "usbd_cdc.h"
+#include "usbd_def.h"
 #include <stdint.h>
 
 // new

@@ -8,12 +8,14 @@
 #include "sysmem.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
+#include <string.h>
 
 void SystemClock_Config(void);
 
 volatile WorkPackageType work_queue[WORK_QUEUE_SIZE] = {0};
 volatile uint8_t current_queue_in_index = 0;
 volatile uint8_t current_queue_out_index = 0;
+static Payload payload = {};
 
 /**
  * @brief  The application entry point.
@@ -28,8 +30,6 @@ int main(void) {
   MX_USB_Device_Init();
   DWT_Init();
 
-  Payload payload = {};
-
   while (1) {
     __disable_irq();
     WorkPackageType work_package_type = NO_WORK;
@@ -43,7 +43,8 @@ int main(void) {
     if (work_package_type != NO_WORK) {
       process_data(&payload, work_package_type);
       uint16_t length = sizeof(PacketHeader) + sizeof(Metadata);
-      CDC_Transmit_FS((uint8_t *)&payload, length);
+      memcpy(UserTxBufferFS, &payload, length);
+      CDC_Transmit_FS(UserTxBufferFS, length);
     }
   }
 }

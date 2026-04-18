@@ -135,6 +135,10 @@ extern "C" void process_data(Payload *payload,
   process_stride(bufferView + (IMG_W * 4), lse_data, SAD_BLOCK_SIZE * 4);
   process_stride(bufferView + (IMG_W * 5), lse_data, SAD_BLOCK_SIZE * 5);
   process_stride(bufferView + (IMG_W * 6), lse_data, SAD_BLOCK_SIZE * 6);
+  process_stride(bufferView + (IMG_W * 7), lse_data, SAD_BLOCK_SIZE * 7);
+  process_stride(bufferView + (IMG_W * 8), lse_data, SAD_BLOCK_SIZE * 8);
+  process_stride(bufferView + (IMG_W * 9), lse_data, SAD_BLOCK_SIZE * 9);
+  process_stride(bufferView + (IMG_W * 10), lse_data, SAD_BLOCK_SIZE * 10);
 
   LSE_solution solution = solve_lse(lse_data);
 
