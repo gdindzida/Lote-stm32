@@ -84,6 +84,8 @@ if __name__ == "__main__":
         print("Write frequency: unlimited (max throughput)")
 
     frame_write_times: List[float] = []
+    frame_deadline_times: List[float] = []  # absolute deadline for each sent frame
+    frame_loop_times: List[float] = []  # write-to-read latency per frame (seconds)
     process_elapsed_times: List[float] = []
     peak_memory: List[float] = [0.0, 0.0]  # [stack, heap]
     recorded_frames: List[FrameRecord] = []
@@ -132,6 +134,7 @@ if __name__ == "__main__":
             frame_buffer_sem,
             error_event,
             stop_event,
+            frame_deadline_times,
         ),
         daemon=True,
     )
@@ -149,6 +152,7 @@ if __name__ == "__main__":
             frame_buffer_sem,
             error_event,
             streamer.total,
+            frame_loop_times,
         ),
         daemon=True,
     )
@@ -167,9 +171,9 @@ if __name__ == "__main__":
     reader.join()
     stop_event.set()  # unblock keyboard listener if stream finished naturally
 
-    # Derive write-to-write intervals from the absolute timestamps collected by
-    # the writer.  This avoids any timing measurement inside the hot loop.
-    loop_times = [t2 - t1 for t1, t2 in zip(frame_write_times, frame_write_times[1:])]
+    # Write-to-read latency per frame: collected by the reader as each MCU
+    # response is fully received.  One entry per successfully processed frame.
+    loop_times = frame_loop_times
 
     if error_event.is_set():
         print("An error occurred during serial communication. Aborting.")
@@ -279,4 +283,12 @@ if __name__ == "__main__":
     cv2.destroyAllWindows()
 
     if args.plot:
-        plot_timing(loop_times, process_elapsed_times, missed_frame_times, start_time)
+        plot_timing(
+            loop_times,
+            process_elapsed_times,
+            missed_frame_times,
+            start_time,
+            frame_write_times,
+            frame_deadline_times,
+            write_freq_hz,
+        )

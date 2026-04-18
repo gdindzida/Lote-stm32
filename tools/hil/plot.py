@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 
 def plot_timing(
@@ -6,27 +6,52 @@ def plot_timing(
     process_elapsed_times: List[float],
     missed_frame_times: List[float],
     start_time: float,
+    frame_write_times: List[float],
+    frame_deadline_times: List[float],
+    write_freq_hz: Optional[float] = None,
 ) -> None:
-    """Display a per-frame timing bar chart after a HIL run.
+    """Display a timeseries plot after a HIL run.
 
-    For each sent frame two narrow side-by-side bars are drawn:
-      - Yellow  : loop time (write-to-write interval, ms)
-      - Orange  : MCU process time (ms)
+    The plot shows the write-to-read latency and MCU process time as line
+    series over wall-clock time.  Individual write events, read events,
+    deadlines, and missed frames are overlaid as markers / vertical lines so
+    the full picture of when each event occurred is visible at a glance.
 
-    Missed frames are marked with a red × at the corresponding timeline
-    position.
+    Horizontal grey dashed lines are drawn at every integer multiple of the
+    frame period (1 / write_freq_hz) in milliseconds, giving an instant visual
+    reference for whether each frame's round-trip fits within a single period.
+    The period is derived from ``write_freq_hz`` when supplied, or inferred
+    from the spacing of consecutive deadline timestamps as a fallback.
+
+    Layout
+    ------
+    X axis : time from run start (seconds).
+    Y axis : duration (ms).
+
+    Series / markers
+    ----------------
+    Yellow line  – write-to-read loop time per frame, plotted at each frame's
+                   read time (write_time + loop_time).
+    Orange line  – MCU process time per frame, also plotted at read time.
+    Blue  ▼      – frame write events (y = 0 baseline).
+    Cyan  ▲      – frame read events, positioned at write_time + loop_time
+                   (y = 0 baseline).
+    Green dashes – absolute deadlines for each sent frame.
+    Grey dashes  – horizontal lines at multiples of the frame period.
+    Red   ×      – missed/skipped frames (semaphore buffer full).
 
     Args:
-        loop_times:            Write-to-write intervals in seconds.
+        loop_times:            Write-to-read latency per frame in seconds.
         process_elapsed_times: MCU elapsed-time values in milliseconds.
-        missed_frame_times:    Absolute timestamps (time.time()) of each
-                               missed/skipped frame.
-        start_time:            Absolute timestamp of the run start, used to
-                               convert missed-frame times to relative seconds.
+        missed_frame_times:    Absolute timestamps of each missed frame.
+        start_time:            Absolute timestamp of the run start.
+        frame_write_times:     Absolute write timestamp for each sent frame.
+        frame_deadline_times:  Absolute deadline for each sent frame.
+        write_freq_hz:         Frame write frequency in Hz.  Used to draw
+                               horizontal period-multiple lines.  If None the
+                               period is inferred from deadline spacing.
     """
     try:
-        import matplotlib.patches as mpatches
-        import matplotlib.lines as mlines
         import matplotlib.pyplot as plt
     except ImportError:
         print(
@@ -39,106 +64,147 @@ def plot_timing(
         print("Not enough data to generate a timing plot (no loop times recorded).")
         return
 
+    n_sent = len(loop_times)
+
     # ------------------------------------------------------------------ #
-    # Derived data                                                         #
+    # Relative timestamps (seconds from run start)                         #
     # ------------------------------------------------------------------ #
-    n_sent = len(loop_times) + 1  # first frame + one per loop_times entry
+    write_rel: List[float] = [t - start_time for t in frame_write_times[:n_sent]]
 
-    # Cumulative send times in seconds from run start
-    sent_times_s: List[float] = [0.0]
-    for lt in loop_times:
-        sent_times_s.append(sent_times_s[-1] + lt)
+    # Read time = write time + loop time (write-to-read latency)
+    read_rel: List[float] = [
+        (frame_write_times[i] - start_time) + loop_times[i] for i in range(n_sent)
+    ]
 
-    # Y values in ms
-    loop_times_ms = [lt * 1000.0 for lt in loop_times]
-    process_times_ms = list(process_elapsed_times)
+    loop_times_ms: List[float] = [lt * 1000.0 for lt in loop_times]
+    process_times_ms: List[float] = list(process_elapsed_times[:n_sent])
 
-    # Bar width: 30 % of the average loop interval per bar, so the pair
-    # occupies ~62 % of the slot (two bars + a 2 % gap between them).
-    avg_loop_s = sum(loop_times) / len(loop_times)
-    bar_w = avg_loop_s * 0.30
-    gap_w = bar_w * 0.07  # small gap between the two bars in a pair
+    deadline_rel: List[float] = [d - start_time for d in frame_deadline_times]
 
     # ------------------------------------------------------------------ #
     # Plot                                                                 #
     # ------------------------------------------------------------------ #
-    fig, ax = plt.subplots(figsize=(max(12, n_sent * 0.25), 6))
+    fig, ax = plt.subplots(figsize=(max(14, n_sent * 0.3), 6))
 
-    for i in range(n_sent):
-        x = sent_times_s[i]
+    # --- Loop time line series (plotted at read time = write + loop_time) ---
+    ax.plot(
+        read_rel,
+        loop_times_ms,
+        color="gold",
+        linewidth=1.2,
+        marker="o",
+        markersize=3,
+        label="Loop time (write→read)",
+        zorder=3,
+    )
 
-        # Yellow bar: loop time
-        h_loop = loop_times_ms[i] if i < len(loop_times_ms) else 0.0
-        if h_loop > 0:
-            ax.bar(
-                x,
-                h_loop,
-                width=bar_w,
-                align="edge",
-                color="yellow",
-                edgecolor="goldenrod",
-                linewidth=0.5,
-            )
+    # --- MCU process time line series (plotted at read time) ---
+    if process_times_ms:
+        ax.plot(
+            read_rel[: len(process_times_ms)],
+            process_times_ms,
+            color="darkorange",
+            linewidth=1.2,
+            marker="s",
+            markersize=3,
+            label="MCU process time",
+            zorder=3,
+        )
 
-        # Orange bar: process time (placed immediately to the right)
-        if i < len(process_times_ms):
-            h_proc = process_times_ms[i]
-            if h_proc > 0:
-                ax.bar(
-                    x + bar_w + gap_w,
-                    h_proc,
-                    width=bar_w,
-                    align="edge",
-                    color="darkorange",
-                    edgecolor="saddlebrown",
-                    linewidth=0.5,
-                )
+    # --- Deadline vertical dashed lines ---
+    for i, d_rel in enumerate(deadline_rel):
+        ax.axvline(
+            x=d_rel,
+            color="limegreen",
+            linestyle="--",
+            linewidth=0.8,
+            alpha=0.7,
+            # Only label the first one so the legend stays clean
+            label="Deadline" if i == 0 else None,
+        )
 
-    # Red × markers for missed frames (placed on the bottom x axis).
-    # A blended transform (x=data coords, y=axes coords) is used so that
-    # y=0 means "the bottom spine" regardless of the data range, keeping
-    # the y-axis scale and tick labels unaffected.
+    # --- Write event markers on the time axis (blue ▼ at y = 0) ---
+    ax.scatter(
+        write_rel,
+        [0.0] * n_sent,
+        marker="v",
+        color="royalblue",
+        s=50,
+        zorder=5,
+        label="Write event",
+    )
+
+    # --- Read event: vertical cyan line + ▲ marker at y = 0 ---
+    for i, r_rel in enumerate(read_rel):
+        ax.axvline(
+            x=r_rel,
+            color="cyan",
+            linestyle="-",
+            linewidth=0.9,
+            alpha=0.8,
+            zorder=4,
+            label="Read event" if i == 0 else None,
+        )
+    ax.scatter(
+        read_rel,
+        [0.0] * n_sent,
+        marker="^",
+        color="cyan",
+        s=60,
+        zorder=6,
+    )
+
+    # --- Missed frame: vertical red line + × marker at y = 0 ---
     if missed_frame_times:
-        from matplotlib.transforms import blended_transform_factory
-
-        missed_rel_s = [t - start_time for t in missed_frame_times]
-        trans = blended_transform_factory(ax.transData, ax.transAxes)
+        missed_rel = [t - start_time for t in missed_frame_times]
+        for i, m_rel in enumerate(missed_rel):
+            ax.axvline(
+                x=m_rel,
+                color="red",
+                linestyle="-",
+                linewidth=0.9,
+                alpha=0.8,
+                zorder=4,
+                label="Missed frame" if i == 0 else None,
+            )
         ax.scatter(
-            missed_rel_s,
-            [0] * len(missed_rel_s),
+            missed_rel,
+            [0.0] * len(missed_rel),
             marker="x",
             color="red",
             s=120,
             linewidths=2,
-            zorder=5,
-            clip_on=False,
-            transform=trans,
+            zorder=6,
         )
+
+    # --- Horizontal lines at every multiple of the frame period ---
+    # Determine period_ms from write_freq_hz or from deadline spacing.
+    period_ms: Optional[float] = None
+    if write_freq_hz is not None and write_freq_hz > 0:
+        period_ms = 1000.0 / write_freq_hz
+    elif len(frame_deadline_times) >= 2:
+        period_ms = (frame_deadline_times[1] - frame_deadline_times[0]) * 1000.0
+
+    if period_ms is not None and period_ms > 0:
+        all_durations = loop_times_ms + process_times_ms
+        y_max = max(all_durations) * 1.2 if all_durations else period_ms * 3
+        multiple = 1
+        while multiple * period_ms <= y_max:
+            ax.axhline(
+                y=multiple * period_ms,
+                color="grey",
+                linestyle="--",
+                linewidth=0.7,
+                alpha=0.6,
+                label=f"Period × {multiple}" if multiple == 1 else None,
+            )
+            multiple += 1
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Duration (ms)")
-    ax.set_title("HIL Frame Timing")
+    ax.set_title("HIL Frame Timing — Timeseries")
+    ax.set_ylim(bottom=0)
 
-    legend_handles = [
-        mpatches.Patch(facecolor="yellow", edgecolor="goldenrod", label="Loop time"),
-        mpatches.Patch(
-            facecolor="darkorange", edgecolor="saddlebrown", label="Process time"
-        ),
-    ]
-    if missed_frame_times:
-        legend_handles.append(
-            mlines.Line2D(
-                [],
-                [],
-                marker="x",
-                color="red",
-                linestyle="None",
-                markersize=10,
-                markeredgewidth=2,
-                label="Missed frame",
-            )
-        )
-
-    ax.legend(handles=legend_handles)
+    ax.legend(loc="upper right")
     plt.tight_layout()
     plt.show()
