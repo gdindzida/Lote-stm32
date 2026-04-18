@@ -17,12 +17,12 @@ struct LSE_data {
   uint8_t N;
   int16_t u_sum;
   int16_t v_sum;
-  uint32_t rx_sum;
-  uint32_t ry_sum;
+  int32_t rx_sum;
+  int32_t ry_sum;
   uint32_t rx2_sum;
   uint32_t ry2_sum;
-  uint32_t rxv_sum;
-  uint32_t ryu_sum;
+  int32_t rxv_sum;
+  int32_t ryu_sum;
 };
 
 struct LSE_solution {

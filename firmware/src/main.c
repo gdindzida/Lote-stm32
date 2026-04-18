@@ -42,7 +42,8 @@ int main(void) {
 
     if (work_package_type != NO_WORK) {
       process_data(&payload, work_package_type);
-      uint16_t length = sizeof(PacketHeader) + sizeof(Metadata);
+      uint16_t length =
+          sizeof(Payload); // sizeof(PacketHeader) + sizeof(Metadata);
       memcpy(UserTxBufferFS, &payload, length);
       CDC_Transmit_FS(UserTxBufferFS, length);
     }

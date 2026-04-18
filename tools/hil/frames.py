@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 
 import cv2
 import numpy as np
 
-from hil.protocol import Metadata
+from hil.protocol import Metadata, Coordinate
 
 # ---------------------------------------------------------------------------
 # Image scaling constants – single source of truth for the downscaled size
@@ -27,6 +28,8 @@ class FrameRecord:
     meta: Metadata
     meta_size: int
     timestamp: float = 0.0
+    # Optical-flow vectors parsed from the payload (one per grid point, row-major).
+    coords: List[Coordinate] = field(default_factory=lambda: [])
 
 
 @dataclass

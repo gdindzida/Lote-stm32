@@ -102,6 +102,16 @@ if __name__ == "__main__":
         "sensor).  Provide this when VFOV differs from HFOV so that the ty (North) "
         "ground truth uses the correct per-axis GSD.",
     )
+    parser.add_argument(
+        "--save-dir",
+        type=str,
+        metavar="PATH",
+        default=None,
+        help="Directory in which to save every annotated big image during playback "
+        "(one PNG per frame, named frame_XXXXXX.png).  The directory is created "
+        "automatically if it does not exist.  Only has effect when --playback or "
+        "--playback-realtime is also specified.",
+    )
     args = parser.parse_args()
 
     do_record = args.playback is not None or args.playback_realtime
@@ -116,7 +126,7 @@ if __name__ == "__main__":
     streamer: DatasetStreamer = UAVStreamer(data_root, None)
 
     port = find_stm32_port()
-    ser = serial.Serial(port, timeout=1)
+    ser = serial.Serial(port, timeout=1000)
     print(f"Connected to {port}")
 
     if write_freq_hz is not None:
@@ -305,6 +315,13 @@ if __name__ == "__main__":
             print(
                 f"Starting playback of {len(recorded_frames)} frames (delay={args.playback}ms)..."
             )
+
+        # Create the save directory once before the loop (if requested).
+        save_dir: Optional[str] = args.save_dir
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+            print(f"Saving annotated big images to: {save_dir}")
+
         for idx, frame in enumerate(recorded_frames):
             if args.playback_realtime:
                 if idx + 1 < len(recorded_frames):
@@ -322,8 +339,64 @@ if __name__ == "__main__":
             scale_x = frame.left_img.shape[1] / IMG_SCALE_SIZE[0]
             scale_y = frame.left_img.shape[0] / IMG_SCALE_SIZE[1]
 
+            # ------------------------------------------------------------------
+            # Overlay optical-flow vectors on the small (96×96) image.
+            #
+            # The 11×11 grid of vectors is laid out as follows:
+            #   - Column origins: x = 8, 16, 24, …, 88  (start=8, step=8)
+            #   - Row    origins: y = 8, 16, 24, …, 88  (start=8, step=8)
+            #
+            # Each Coordinate (u, v) is the optical-flow displacement at that
+            # grid point.  An arrow is drawn from (gx, gy) to (gx+u, gy+v).
+            # ------------------------------------------------------------------
+            GRID_START = 8
+            GRID_STEP = 8
+            GRID_COLS = 11
+            GRID_ROWS = 11
+
+            if frame.coords:
+                for row_idx in range(GRID_ROWS):
+                    for col_idx in range(GRID_COLS):
+                        coord = frame.coords[row_idx * GRID_COLS + col_idx]
+                        gx = GRID_START + col_idx * GRID_STEP  # 8, 16, …, 88
+                        gy = GRID_START + row_idx * GRID_STEP  # 8, 16, …, 88
+                        ex = gx + coord.u
+                        ey = gy + coord.v
+                        cv2.arrowedLine(
+                            small_annotated,
+                            (gx, gy),
+                            (ex, ey),
+                            (0, 255, 0),  # green arrow
+                            1,
+                            tipLength=0.4,
+                        )
+
+                        # --------------------------------------------------
+                        # Same arrow on the big (full-resolution) image.
+                        # Scale both origins and displacements by the ratio
+                        # between the big image and the 96×96 small image.
+                        # --------------------------------------------------
+                        gx_big = int(gx * scale_x)
+                        gy_big = int(gy * scale_y)
+                        ex_big = int((gx + coord.u) * scale_x)
+                        ey_big = int((gy + coord.v) * scale_y)
+                        cv2.arrowedLine(
+                            big_annotated,
+                            (gx_big, gy_big),
+                            (ex_big, ey_big),
+                            (0, 255, 0),  # green arrow
+                            max(1, int(scale_x)),
+                            tipLength=0.3,
+                        )
+
             cv2.imshow("Left", big_annotated)
             cv2.imshow("Small left", small_annotated)
+
+            # Save the annotated big image to disk (if --save-dir was given).
+            if save_dir is not None:
+                filename = os.path.join(save_dir, f"frame_{idx:06d}.png")
+                cv2.imwrite(filename, big_annotated)
+
             key = cv2.waitKey(frame_delay_ms)
             if key == ord("q"):  # press Q to quit
                 break

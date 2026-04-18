@@ -7,7 +7,15 @@ from typing import List, Optional
 import serial
 
 from hil.frames import FrameItem, FrameRecord, scale_image
-from hil.protocol import HEADER_FMT, MAGIC, METADATA_FMT, Metadata
+from hil.protocol import (
+    HEADER_FMT,
+    MAGIC,
+    METADATA_FMT,
+    COORD_FMT,
+    NUM_COORDS,
+    Metadata,
+    Coordinate,
+)
 from hil.streamer import DatasetStreamer
 
 
@@ -207,6 +215,7 @@ def reader_thread_fn(
             error_event.set()
             break
 
+        print("BOKTE citam velicinu ", length)
         payload = ser.read(length)
         if len(payload) < length:
             print("Reader: timeout waiting for payload")
@@ -244,6 +253,16 @@ def reader_thread_fn(
             frame_meta_list.append((item.frame_number, meta.tx, meta.ty, meta.theta))
 
         if do_record:
+            # Parse the NUM_COORDS optical-flow vectors that follow the metadata.
+            # Each Coordinate is two signed int16_t values: (u=row, v=col) as packed
+            # by the firmware's Coordinate struct {int16_t row; int16_t col;}.
+            coord_size = struct.calcsize(COORD_FMT)
+            coords: List[Coordinate] = []
+            for i in range(NUM_COORDS):
+                offset = meta_size + i * coord_size
+                u, v = struct.unpack(COORD_FMT, payload[offset : offset + coord_size])
+                coords.append(Coordinate(u=u, v=v))
+
             recorded_frames.append(
                 FrameRecord(
                     small_img=small_img,
@@ -252,5 +271,6 @@ def reader_thread_fn(
                     meta=meta,
                     meta_size=meta_size,
                     timestamp=time.time(),
+                    coords=coords,
                 )
             )

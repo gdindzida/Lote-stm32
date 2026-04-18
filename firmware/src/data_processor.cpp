@@ -8,9 +8,8 @@
 #include "usbd_cdc_if.h"
 #include "usbd_def.h"
 #include <array>
+#include <cstdint>
 #include <cstdlib>
-
-#define FAST_THRESHOLD (3)
 
 namespace {
 
@@ -35,23 +34,23 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
 }
 
 void process_stride(const uint8_t *img_stride, LSE_data &lse_data,
-                    uint8_t stride_row_offset) {
+                    uint8_t stride_row_offset, Payload *payload,
+                    int32_t &index) {
 
   for (int i = 0; i < ((IMG_W / SAD_BLOCK_SIZE) - 1); ++i) {
-    int min_sad2 = SAD_MAX;
-    min_sad2 *= min_sad2;
+    int min_sad = SAD_MAX;
     int16_t u = 0;
     int16_t v = 0;
 
     Coordinate current_start = {
-        static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * i)),
-        static_cast<int16_t>(SEARCH_SIZE)};
+        static_cast<int16_t>(SEARCH_SIZE),
+        static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * i))};
 
     for (const Coordinate &search_index : search_indices) {
-      int sad2 = 0;
+      int sad = 0;
       Coordinate candidate_start = {
-          static_cast<int16_t>(current_start.col + search_index.col),
-          static_cast<int16_t>(current_start.row + search_index.row)};
+          static_cast<int16_t>(current_start.row + search_index.row),
+          static_cast<int16_t>(current_start.col + search_index.col)};
 
       for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
         for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
@@ -60,24 +59,32 @@ void process_stride(const uint8_t *img_stride, LSE_data &lse_data,
           int candidate_val = static_cast<int>(img_stride[coord_to_index(
               candidate_start.row + row, candidate_start.col + col, IMG_W)]);
 
-          sad2 += (candidate_val - current_val) * (candidate_val - current_val);
+          int diff = candidate_val - current_val;
+          if (diff < 0) {
+            diff *= -1;
+          }
+
+          sad += diff;
         }
       }
 
-      if (sad2 < min_sad2) {
-        min_sad2 = sad2;
+      if (sad < min_sad) {
+        min_sad = sad;
         u = search_index.col;
         v = search_index.row;
       }
     }
 
-    if (min_sad2 < SAD_CEILING * SAD_CEILING) {
+    payload->coordinates[index] = {u, v};
+    index++;
+
+    if (min_sad < SAD_CEILING) {
       uint8_t gx =
           SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + (SAD_BLOCK_SIZE * i);
       uint8_t gy = SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + stride_row_offset;
 
-      uint32_t rx = gx - CENTER_COL;
-      uint32_t ry = gy - CENTER_ROW;
+      int32_t rx = static_cast<int32_t>(gx) - CENTER_COL;
+      int32_t ry = static_cast<int32_t>(gy) - CENTER_ROW;
 
       lse_data.N++;
       lse_data.u_sum += u;
@@ -128,17 +135,27 @@ extern "C" void process_data(Payload *payload,
 
   LSE_data lse_data{};
 
-  process_stride(bufferView, lse_data, 0);
-  process_stride(bufferView + IMG_W, lse_data, SAD_BLOCK_SIZE);
-  process_stride(bufferView + (IMG_W * 2), lse_data, SAD_BLOCK_SIZE * 2);
-  process_stride(bufferView + (IMG_W * 3), lse_data, SAD_BLOCK_SIZE * 3);
-  process_stride(bufferView + (IMG_W * 4), lse_data, SAD_BLOCK_SIZE * 4);
-  process_stride(bufferView + (IMG_W * 5), lse_data, SAD_BLOCK_SIZE * 5);
-  process_stride(bufferView + (IMG_W * 6), lse_data, SAD_BLOCK_SIZE * 6);
-  process_stride(bufferView + (IMG_W * 7), lse_data, SAD_BLOCK_SIZE * 7);
-  process_stride(bufferView + (IMG_W * 8), lse_data, SAD_BLOCK_SIZE * 8);
-  process_stride(bufferView + (IMG_W * 9), lse_data, SAD_BLOCK_SIZE * 9);
-  process_stride(bufferView + (IMG_W * 10), lse_data, SAD_BLOCK_SIZE * 10);
+  int32_t index = 0;
+  process_stride(bufferView, lse_data, 0, payload, index);
+  process_stride(bufferView + IMG_W, lse_data, SAD_BLOCK_SIZE, payload, index);
+  process_stride(bufferView + (IMG_W * 2), lse_data, SAD_BLOCK_SIZE * 2,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 3), lse_data, SAD_BLOCK_SIZE * 3,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 4), lse_data, SAD_BLOCK_SIZE * 4,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 5), lse_data, SAD_BLOCK_SIZE * 5,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 6), lse_data, SAD_BLOCK_SIZE * 6,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 7), lse_data, SAD_BLOCK_SIZE * 7,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 8), lse_data, SAD_BLOCK_SIZE * 8,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 9), lse_data, SAD_BLOCK_SIZE * 9,
+                 payload, index);
+  process_stride(bufferView + (IMG_W * 10), lse_data, SAD_BLOCK_SIZE * 10,
+                 payload, index);
 
   LSE_solution solution = solve_lse(lse_data);
 
@@ -149,7 +166,7 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.ty = solution.ty;
   payload->metadata.theta = solution.theta;
 
-  payload->header.length = sizeof(Metadata);
+  payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
 
   uint32_t elapsed_cycles = DWT_GetCycles() - start_cycles;
   payload->metadata.elapsed_time_ms =

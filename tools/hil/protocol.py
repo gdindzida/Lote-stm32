@@ -4,7 +4,9 @@ from dataclasses import dataclass
 MAGIC = 0xABCD
 HEADER_FMT = "<HH"
 METADATA_FMT = "<IhhHfffff"
-COORD_FMT = "BB"
+# Each Coordinate is two signed int16_t fields (row=u, col=v) as packed by the firmware.
+COORD_FMT = "<hh"
+NUM_COORDS = 121  # 11 columns × 11 rows
 
 
 @dataclass
@@ -22,5 +24,14 @@ class Metadata:
 
 @dataclass
 class Coordinate:
-    x: int
-    y: int
+    """Optical-flow vector at a single grid point.
+
+    ``u`` is the horizontal displacement (x direction).
+    ``v`` is the vertical displacement (y direction).
+
+    These correspond to the firmware's ``u = search_index.col`` and
+    ``v = search_index.row`` values packed as ``{int16_t row=u; int16_t col=v}``.
+    """
+
+    u: int  # horizontal (x) displacement  — firmware field: row
+    v: int  # vertical   (y) displacement  — firmware field: col

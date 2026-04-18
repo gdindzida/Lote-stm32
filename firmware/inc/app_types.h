@@ -20,7 +20,7 @@ extern "C" {
 #define SEARCH_SIZE (4)
 #define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
 #define K_FACTOR (2)
-#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 20)
+#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 15)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
 
 // NOLINTNEXTLINE
@@ -59,7 +59,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   PacketHeader header;
   Metadata metadata;
-  Coordinate coordinates[32];
+  Coordinate coordinates[121];
 } Payload;
 
 #ifdef __cplusplus
