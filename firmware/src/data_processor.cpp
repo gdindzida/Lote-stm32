@@ -116,7 +116,7 @@ LSE_solution solve_lse(LSE_data &lse_data) {
 
 extern "C" void process_data(Payload *payload,
                              WorkPackageType work_package_type) {
-  payload->metadata.elapsed_time_ms = DWT_GetMs();
+  uint32_t start_cycles = DWT_GetCycles();
 
   payload->header.magic = MAGIC;
   payload->header.length = 0;
@@ -151,8 +151,9 @@ extern "C" void process_data(Payload *payload,
 
   payload->header.length = sizeof(Metadata);
 
+  uint32_t elapsed_cycles = DWT_GetCycles() - start_cycles;
   payload->metadata.elapsed_time_ms =
-      DWT_GetMs() - payload->metadata.elapsed_time_ms;
+      elapsed_cycles / (HAL_RCC_GetHCLKFreq() / 1000U);
   payload->metadata.stack_mem_usage = Stack_GetPeakUsage();
   payload->metadata.heap_mem_usage = Heap_GetPeakUsage();
 }

@@ -200,12 +200,12 @@ if __name__ == "__main__":
         print("std loop time(ms): ", std_loop_time)
 
     if process_elapsed_times:
-        max_process_elapsed_time = 0.001 * max(process_elapsed_times)
-        min_process_elapsed_time = 0.001 * min(process_elapsed_times)
-        avg_process_elapsed_time = (
-            0.001 * sum(process_elapsed_times) / len(process_elapsed_times)
+        max_process_elapsed_time = max(process_elapsed_times)
+        min_process_elapsed_time = min(process_elapsed_times)
+        avg_process_elapsed_time = sum(process_elapsed_times) / len(
+            process_elapsed_times
         )
-        std_process_elapsed_time = 0.001 * statistics.stdev(process_elapsed_times)
+        std_process_elapsed_time = statistics.stdev(process_elapsed_times)
 
         print("")
         print(

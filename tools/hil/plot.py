@@ -11,14 +11,14 @@ def plot_timing(
 
     For each sent frame two narrow side-by-side bars are drawn:
       - Yellow  : loop time (write-to-write interval, ms)
-      - Orange  : MCU process time (ms, converted from the raw µs value)
+      - Orange  : MCU process time (ms)
 
     Missed frames are marked with a red × at the corresponding timeline
     position.
 
     Args:
         loop_times:            Write-to-write intervals in seconds.
-        process_elapsed_times: Raw MCU elapsed-time values in microseconds.
+        process_elapsed_times: MCU elapsed-time values in milliseconds.
         missed_frame_times:    Absolute timestamps (time.time()) of each
                                missed/skipped frame.
         start_time:            Absolute timestamp of the run start, used to
@@ -51,8 +51,7 @@ def plot_timing(
 
     # Y values in ms
     loop_times_ms = [lt * 1000.0 for lt in loop_times]
-    # process_elapsed_times raw values are in µs → convert to ms
-    process_times_ms = [v * 0.001 for v in process_elapsed_times]
+    process_times_ms = list(process_elapsed_times)
 
     # Bar width: 30 % of the average loop interval per bar, so the pair
     # occupies ~62 % of the slot (two bars + a 2 % gap between them).
@@ -95,18 +94,25 @@ def plot_timing(
                     linewidth=0.5,
                 )
 
-    # Red × markers for missed frames
+    # Red × markers for missed frames (placed on the bottom x axis).
+    # A blended transform (x=data coords, y=axes coords) is used so that
+    # y=0 means "the bottom spine" regardless of the data range, keeping
+    # the y-axis scale and tick labels unaffected.
     if missed_frame_times:
-        y_top = ax.get_ylim()[1]
+        from matplotlib.transforms import blended_transform_factory
+
         missed_rel_s = [t - start_time for t in missed_frame_times]
+        trans = blended_transform_factory(ax.transData, ax.transAxes)
         ax.scatter(
             missed_rel_s,
-            [y_top * 0.95] * len(missed_rel_s),
+            [0] * len(missed_rel_s),
             marker="x",
             color="red",
             s=120,
             linewidths=2,
             zorder=5,
+            clip_on=False,
+            transform=trans,
         )
 
     ax.set_xlabel("Time (s)")

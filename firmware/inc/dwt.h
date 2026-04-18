@@ -8,7 +8,7 @@ extern "C" {
 #include <stdint.h>
 
 void DWT_Init(void);
-uint32_t DWT_GetMs(void);
+uint32_t DWT_GetCycles(void);
 
 #ifdef __cplusplus
 }

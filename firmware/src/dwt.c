@@ -7,6 +7,4 @@ void DWT_Init(void) {
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 }
 
-uint32_t DWT_GetMs(void) {
-  return DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000U);
-}
+uint32_t DWT_GetCycles(void) { return DWT->CYCCNT; }
