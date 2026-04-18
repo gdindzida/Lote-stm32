@@ -42,13 +42,13 @@ void process_stride(const uint8_t *img_stride, LSE_data &lse_data,
     min_sad2 *= min_sad2;
     int16_t u = 0;
     int16_t v = 0;
-    int sad2 = 0;
 
     Coordinate current_start = {
         static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * i)),
         static_cast<int16_t>(SEARCH_SIZE)};
 
     for (const Coordinate &search_index : search_indices) {
+      int sad2 = 0;
       Coordinate candidate_start = {
           static_cast<int16_t>(current_start.col + search_index.col),
           static_cast<int16_t>(current_start.row + search_index.row)};
