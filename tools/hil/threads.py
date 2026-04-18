@@ -157,6 +157,7 @@ def reader_thread_fn(
     error_event: threading.Event,
     total: int,
     frame_loop_times: List[float],
+    frame_meta_list: "List[tuple[int, float, float, float]] | None" = None,
 ):
     """Reads serial responses and collects statistics / records frames.
 
@@ -237,6 +238,10 @@ def reader_thread_fn(
         print("Peak stack memory: ", meta.stack_mem_usage)
         print("Heap mem usage: ", meta.heap_mem_usage)
         print("")
+
+        # Collect (frame_number, tx, ty, theta) for KPI computation when requested.
+        if frame_meta_list is not None:
+            frame_meta_list.append((item.frame_number, meta.tx, meta.ty, meta.theta))
 
         if do_record:
             recorded_frames.append(

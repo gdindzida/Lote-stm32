@@ -8,6 +8,8 @@ import time
 import argparse
 from typing import List, Optional
 
+from cycler import V
+
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
 import cv2
 import serial
@@ -19,6 +21,7 @@ from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
 from hil.plot import plot_timing
+from hil.kpi import load_ground_truth, compute_kpi, print_kpi_report
 
 if __name__ == "__main__":
 
@@ -59,6 +62,39 @@ if __name__ == "__main__":
         help="After the run, display a timing bar chart (loop time / process time per frame, "
         "with markers for missed frames).",
     )
+    parser.add_argument(
+        "--kpi",
+        action="store_true",
+        default=False,
+        help="After the run, compute and print accuracy KPI (MAE, RMSE, R², …) comparing "
+        "the STM32's tx/ty/theta estimates to ground truth derived from query.csv.",
+    )
+    parser.add_argument(
+        "--gsd",
+        type=float,
+        metavar="M_PER_PX",
+        default=0.0,
+        help="Ground Sample Distance in metres per pixel for the 96×96 image used by the "
+        "STM32.  When omitted (or 0), it is auto-computed from the altitude column in "
+        "query.csv and --hfov.",
+    )
+    parser.add_argument(
+        "--hfov",
+        type=float,
+        metavar="DEG",
+        default=60.0,
+        help="Camera horizontal field of view in degrees (default: 60).  Used to "
+        "auto-compute the GSD from altitude when --gsd is not provided.",
+    )
+    parser.add_argument(
+        "--vfov",
+        type=float,
+        metavar="DEG",
+        default=None,
+        help="Camera vertical field of view in degrees.  Defaults to --hfov (square "
+        "sensor).  Provide this when VFOV differs from HFOV so that the ty (North) "
+        "ground truth uses the correct per-axis GSD.",
+    )
     args = parser.parse_args()
 
     do_record = args.playback is not None or args.playback_realtime
@@ -91,6 +127,10 @@ if __name__ == "__main__":
     recorded_frames: List[FrameRecord] = []
     missed_frames: List[int] = [0]  # [missed_frame_count]
     missed_frame_times: List[float] = []  # absolute timestamps of each missed frame
+    # (frame_number, tx, ty, theta) per received frame — populated only when --kpi
+    frame_meta_list: "List[tuple[int, float, float, float]] | None" = (
+        [] if args.kpi else None
+    )
 
     print("Starting UAV clip playback...")
     print("Press 'q' + Enter at any time to stop streaming early.")
@@ -154,6 +194,7 @@ if __name__ == "__main__":
             streamer.total,
             frame_loop_times,
         ),
+        kwargs={"frame_meta_list": frame_meta_list},
         daemon=True,
     )
 
@@ -292,3 +333,31 @@ if __name__ == "__main__":
             frame_deadline_times,
             write_freq_hz,
         )
+
+    if args.kpi and frame_meta_list:
+        print("")
+        print("Computing KPI…")
+        try:
+            tx_gt, ty_gt, theta_gt, gsd_x, gsd_y = load_ground_truth(
+                data_root, gsd_m_per_px=args.gsd, hfov_deg=args.hfov, vfov_deg=args.vfov
+            )
+
+            frame_numbers = [fm[0] for fm in frame_meta_list]
+            tx_pred = [fm[1] for fm in frame_meta_list]
+            ty_pred = [fm[2] for fm in frame_meta_list]
+            theta_pred = [fm[3] for fm in frame_meta_list]
+
+            kpi_result = compute_kpi(
+                frame_numbers,
+                tx_pred,
+                ty_pred,
+                theta_pred,
+                tx_gt,
+                ty_gt,
+                theta_gt,
+            )
+            print_kpi_report(kpi_result, gsd_x, gsd_y)
+        except Exception as exc:
+            print(f"KPI computation failed: {exc}")
+    elif args.kpi:
+        print("KPI requested but no frames were successfully received — skipping.")
