@@ -4,7 +4,7 @@
         {
             "label": "Lote-stm32: cmake configure",
             "type": "shell",
-            "command": "cmake -B build-debug -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi-toolchain.cmake",
+            "command": "cmake -B build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi-toolchain.cmake",
             "options": {
                 "cwd": "${workspaceFolder}/firmware/"
             },
@@ -69,6 +69,25 @@
             },
             "group": "build",
             "problemMatcher": []
+        },
+        {
+            "label": "Lote-stm32: openocd",
+            "type": "shell",
+            "command": "openocd -f interface/stlink.cfg -f target/stm32g4x.cfg",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware"
+            },
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "Open On-Chip Debugger",
+                    "endsPattern": "Listening on port 3333"
+                }
+            }
         }
     ]
 }

@@ -4,4 +4,7 @@
     ],
     "python-envs.pythonProjects": [],
     "todo-tree.tree.scanMode": "workspace only",
+    "cmake.sourceDirectory": "/home/mdzida/workspace/projects/Lote-stm32/firmware",
+    "cortex-debug.gdbPath": "gdb-multiarch",
+    "cortex-debug.objdumpPath": "arm-none-eabi-objdump",
 }

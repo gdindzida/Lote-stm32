@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug (OpenOCD + ST-Link)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "cwd": "${workspaceFolder}/firmware",
+
+            // Path to your .elf (has debug symbols)
+            "executable": "${workspaceFolder}/firmware/build-debug/firmware.elf",
+
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32g4x.cfg"
+            ],
+
+            // Reset and halt on connect, then run to main()
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none",
+
+            // SVD file gives you peripheral register viewer (optional but awesome)
+            // "svdFile": "${workspaceFolder}/tools/STM32G431.svd",
+
+            "preLaunchTask": "Lote-stm32: build"
+        }
+    ]
+}
