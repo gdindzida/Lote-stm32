@@ -40,6 +40,17 @@
             "dependsOn": "Lote-stm32: cmake configure"
         },
         {
+            "label": "Lote-stm32: build & flash (STLink)",
+            "type": "shell",
+            "command": "openocd -f interface/stlink.cfg -f target/stm32g4x.cfg -c \"program build-debug/firmware.elf verify reset exit\"",
+            "options": {
+                "cwd": "${workspaceFolder}/firmware"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "dependsOn": "Lote-stm32: build"
+        },
+        {
             "label": "Lote-stm32: flash",
             "type": "shell",
             "command": "../tools/flash.sh",
