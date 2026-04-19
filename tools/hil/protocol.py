@@ -2,6 +2,10 @@ from dataclasses import dataclass
 
 # STM32 binary protocol constants
 MAGIC = 0xABCD
+PACKET_SIZE = 64  # USB FS CDC max OUT packet size (matches firmware PACKET_SIZE)
+APP_RX_BUFFER_SIZE = (
+    9216  # one image frame in bytes (matches firmware APP_RX_BUFFER_SIZE)
+)
 HEADER_FMT = "<HH"
 METADATA_FMT = "<IhhHfffff"
 # Each Coordinate is two signed int16_t fields (row=u, col=v) as packed by the firmware.

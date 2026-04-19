@@ -13,6 +13,8 @@ from hil.protocol import (
     METADATA_FMT,
     COORD_FMT,
     NUM_COORDS,
+    PACKET_SIZE,
+    APP_RX_BUFFER_SIZE,
     Metadata,
     Coordinate,
 )
@@ -84,11 +86,19 @@ def writer_thread_fn(
     print(small_img.shape)
     img_data = small_img.tobytes()
 
+    # Build a sync packet: PacketHeader (magic + length) padded to PACKET_SIZE bytes.
+    # Padding to exactly PACKET_SIZE guarantees it is flushed as its own USB FS
+    # bulk OUT packet and is not coalesced with the following image data.
+    sync_pkt = struct.pack(HEADER_FMT, MAGIC, APP_RX_BUFFER_SIZE).ljust(
+        PACKET_SIZE, b"\x00"
+    )
+
     # Acquire one MCU buffer slot for the first frame (always available at start).
     frame_buffer_sem.acquire()
     frame_write_time = time.time()
     # t0 is the absolute origin for all subsequent deadlines.
     t0: float = frame_write_time
+    ser.write(sync_pkt)
     ser.write(img_data)
     frame_write_times.append(frame_write_time)
     frame_deadline_times.append(t0)  # deadline for frame 0 is t0 by definition
@@ -143,6 +153,7 @@ def writer_thread_fn(
             continue
 
         frame_write_time = time.time()
+        ser.write(sync_pkt)
         ser.write(img_data)
         frame_write_times.append(frame_write_time)
         frame_deadline_times.append(deadline)

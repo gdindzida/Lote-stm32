@@ -11,7 +11,10 @@ extern volatile uint8_t current_queue_in_index;
 uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 volatile uint32_t rxBufferOffset = 0;
-uint8_t packetCounter = 0;
+
+typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
+static volatile RxStateType rxState = RX_WAIT_FOR_MAGIC;
+static volatile uint32_t rxBytesReceived = 0;
 
 static int8_t CDC_Init_FS(void);
 static int8_t CDC_DeInit_FS(void);
@@ -128,27 +131,45 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length) {
  * USBD_FAIL
  */
 static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
-  packetCounter++;
+  switch (rxState) {
 
-  if (packetCounter >= NUM_OF_PACKETS) {
-    packetCounter = 0;
-
-    if (rxBufferOffset == 0) {
-      work_queue[current_queue_in_index] = PROCESS_RX_1;
-    } else {
-      work_queue[current_queue_in_index] = PROCESS_RX_2;
+  case RX_WAIT_FOR_MAGIC: {
+    PacketHeader *hdr = (PacketHeader *)(UserRxBufferFS + rxBufferOffset);
+    if (hdr->magic == MAGIC) {
+      rxBytesReceived = 0;
+      rxState = RX_RECEIVING_DATA;
     }
-    current_queue_in_index++;
-    current_queue_in_index %= WORK_QUEUE_SIZE;
-
-    rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
+    /* Always reset RX pointer to start of slot so magic bytes are
+     * overwritten by the first image data packet. */
     USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
-  } else {
-    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf + *Len);
+    break;
+  }
+
+  case RX_RECEIVING_DATA: {
+    rxBytesReceived += *Len;
+
+    if (rxBytesReceived >= APP_RX_BUFFER_SIZE) {
+      rxBytesReceived = 0;
+      rxState = RX_WAIT_FOR_MAGIC;
+
+      if (rxBufferOffset == 0) {
+        work_queue[current_queue_in_index] = PROCESS_RX_1;
+      } else {
+        work_queue[current_queue_in_index] = PROCESS_RX_2;
+      }
+      current_queue_in_index++;
+      current_queue_in_index %= WORK_QUEUE_SIZE;
+
+      rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
+      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
+    } else {
+      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf + *Len);
+    }
+    break;
+  }
   }
 
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-
   return USBD_OK;
 }
 

@@ -10,7 +10,6 @@ extern "C" {
 #define MAGIC (0xABCD)
 #define PACKET_SIZE (64)
 #define APP_RX_BUFFER_SIZE (9216)
-#define NUM_OF_PACKETS (APP_RX_BUFFER_SIZE / PACKET_SIZE)
 #define APP_RX_DATA_SIZE (2 * APP_RX_BUFFER_SIZE)
 #define APP_TX_DATA_SIZE (1024)
 #define CENTER_COL (47)
