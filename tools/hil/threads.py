@@ -93,9 +93,9 @@ def writer_thread_fn(
     frame_write_times.append(frame_write_time)
     frame_deadline_times.append(t0)  # deadline for frame 0 is t0 by definition
     # Enqueue the frame images so the reader can build a FrameRecord
-    frame_queue.put(
-        FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
-    )
+    # frame_queue.put(
+    #     FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
+    # )
 
     # --- Subsequent frames ---
     while streamer.has_next() and not stop_event.is_set():

@@ -30,6 +30,8 @@ int main(void) {
   MX_USB_Device_Init();
   DWT_Init();
 
+  uint8_t isFirst = 1;
+
   while (1) {
     __disable_irq();
     WorkPackageType work_package_type = NO_WORK;
@@ -41,9 +43,13 @@ int main(void) {
     __enable_irq();
 
     if (work_package_type != NO_WORK) {
-      process_data(&payload, work_package_type);
-      uint16_t length =
-          sizeof(Payload); // sizeof(PacketHeader) + sizeof(Metadata);
+      int16_t length = 0;
+      if (isFirst == 0) {
+        process_data(&payload, work_package_type);
+        length = sizeof(Payload); // sizeof(PacketHeader) + sizeof(Metadata);
+      } else {
+        isFirst = 0;
+      }
       memcpy(UserTxBufferFS, &payload, length);
       CDC_Transmit_FS(UserTxBufferFS, length);
     }

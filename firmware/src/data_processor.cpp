@@ -33,7 +33,8 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
   return (row * width) + col;
 }
 
-void process_stride(const uint8_t *img_stride, LSE_data &lse_data,
+void process_stride(const uint8_t *curr_img_stride,
+                    const uint8_t *prev_img_stride, LSE_data &lse_data,
                     uint8_t stride_row_offset, Payload *payload,
                     int32_t &index) {
 
@@ -54,9 +55,9 @@ void process_stride(const uint8_t *img_stride, LSE_data &lse_data,
 
       for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
         for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-          int current_val = static_cast<int>(img_stride[coord_to_index(
+          int current_val = static_cast<int>(prev_img_stride[coord_to_index(
               current_start.row + row, current_start.col + col, IMG_W)]);
-          int candidate_val = static_cast<int>(img_stride[coord_to_index(
+          int candidate_val = static_cast<int>(curr_img_stride[coord_to_index(
               candidate_start.row + row, candidate_start.col + col, IMG_W)]);
 
           int diff = candidate_val - current_val;
@@ -128,34 +129,40 @@ extern "C" void process_data(Payload *payload,
   payload->header.magic = MAGIC;
   payload->header.length = 0;
 
-  uint8_t *bufferView = UserRxBufferFS;
+  uint8_t *currbufferView = UserRxBufferFS;
   if (work_package_type == PROCESS_RX_2) {
-    bufferView += APP_RX_BUFFER_SIZE;
+    currbufferView += APP_RX_BUFFER_SIZE;
+  }
+
+  uint8_t *prevbufferView = currbufferView + APP_RX_BUFFER_SIZE;
+  if (work_package_type == PROCESS_RX_2) {
+    prevbufferView = UserRxBufferFS;
   }
 
   LSE_data lse_data{};
 
   int32_t index = 0;
-  process_stride(bufferView, lse_data, 0, payload, index);
-  process_stride(bufferView + IMG_W, lse_data, SAD_BLOCK_SIZE, payload, index);
-  process_stride(bufferView + (IMG_W * 2), lse_data, SAD_BLOCK_SIZE * 2,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 3), lse_data, SAD_BLOCK_SIZE * 3,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 4), lse_data, SAD_BLOCK_SIZE * 4,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 5), lse_data, SAD_BLOCK_SIZE * 5,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 6), lse_data, SAD_BLOCK_SIZE * 6,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 7), lse_data, SAD_BLOCK_SIZE * 7,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 8), lse_data, SAD_BLOCK_SIZE * 8,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 9), lse_data, SAD_BLOCK_SIZE * 9,
-                 payload, index);
-  process_stride(bufferView + (IMG_W * 10), lse_data, SAD_BLOCK_SIZE * 10,
-                 payload, index);
+  process_stride(currbufferView, prevbufferView, lse_data, 0, payload, index);
+  process_stride(currbufferView + IMG_W, prevbufferView + IMG_W, lse_data,
+                 SAD_BLOCK_SIZE, payload, index);
+  process_stride(currbufferView + (IMG_W * 2), prevbufferView + (IMG_W * 2),
+                 lse_data, SAD_BLOCK_SIZE * 2, payload, index);
+  process_stride(currbufferView + (IMG_W * 3), prevbufferView + (IMG_W * 3),
+                 lse_data, SAD_BLOCK_SIZE * 3, payload, index);
+  process_stride(currbufferView + (IMG_W * 4), prevbufferView + (IMG_W * 4),
+                 lse_data, SAD_BLOCK_SIZE * 4, payload, index);
+  process_stride(currbufferView + (IMG_W * 5), prevbufferView + (IMG_W * 5),
+                 lse_data, SAD_BLOCK_SIZE * 5, payload, index);
+  process_stride(currbufferView + (IMG_W * 6), prevbufferView + (IMG_W * 6),
+                 lse_data, SAD_BLOCK_SIZE * 6, payload, index);
+  process_stride(currbufferView + (IMG_W * 7), prevbufferView + (IMG_W * 7),
+                 lse_data, SAD_BLOCK_SIZE * 7, payload, index);
+  process_stride(currbufferView + (IMG_W * 8), prevbufferView + (IMG_W * 8),
+                 lse_data, SAD_BLOCK_SIZE * 8, payload, index);
+  process_stride(currbufferView + (IMG_W * 9), prevbufferView + (IMG_W * 9),
+                 lse_data, SAD_BLOCK_SIZE * 9, payload, index);
+  process_stride(currbufferView + (IMG_W * 10), prevbufferView + (IMG_W * 10),
+                 lse_data, SAD_BLOCK_SIZE * 10, payload, index);
 
   LSE_solution solution = solve_lse(lse_data);
 
