@@ -20,7 +20,7 @@ make_search_indices() {
   int16_t index = 0;
   for (int16_t i = -SEARCH_SIZE; i <= SEARCH_SIZE; i++) {
     for (int16_t j = -SEARCH_SIZE; j <= SEARCH_SIZE; j++) {
-      ret[index++] = {i, j};
+      ret[index++] = {i, j, false};
     }
   }
 
@@ -45,13 +45,13 @@ void process_stride(const uint8_t *curr_img_stride,
 
     Coordinate current_start = {
         static_cast<int16_t>(SEARCH_SIZE),
-        static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * i))};
+        static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * i)), false};
 
     for (const Coordinate &search_index : search_indices) {
       int sad = 0;
       Coordinate candidate_start = {
           static_cast<int16_t>(current_start.row + search_index.row),
-          static_cast<int16_t>(current_start.col + search_index.col)};
+          static_cast<int16_t>(current_start.col + search_index.col), false};
 
       for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
         for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
@@ -76,10 +76,11 @@ void process_stride(const uint8_t *curr_img_stride,
       }
     }
 
-    payload->coordinates[index] = {u, v};
+    payload->coordinates[index] = {u, v, false};
     index++;
 
     if (min_sad < SAD_CEILING) {
+      payload->coordinates[index - 1].valid = true;
       uint8_t gx =
           SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + (SAD_BLOCK_SIZE * i);
       uint8_t gy = SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + stride_row_offset;

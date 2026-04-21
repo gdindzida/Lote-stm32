@@ -89,7 +89,7 @@ if __name__ == "__main__":
         "--hfov",
         type=float,
         metavar="DEG",
-        default=60.0,
+        default=92.0,
         help="Camera horizontal field of view in degrees (default: 60).  Used to "
         "auto-compute the GSD from altitude when --gsd is not provided.",
     )
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         "--vfov",
         type=float,
         metavar="DEG",
-        default=None,
+        default=75,
         help="Camera vertical field of view in degrees.  Defaults to --hfov (square "
         "sensor).  Provide this when VFOV differs from HFOV so that the ty (North) "
         "ground truth uses the correct per-axis GSD.",
@@ -362,11 +362,15 @@ if __name__ == "__main__":
                         gy = GRID_START + row_idx * GRID_STEP  # 8, 16, …, 88
                         ex = gx + coord.u
                         ey = gy + coord.v
+                        color = (0, 255, 0)
+                        if not coord.valid:
+                            color = (0, 0, 255)
+
                         cv2.arrowedLine(
                             small_annotated,
                             (gx, gy),
                             (ex, ey),
-                            (0, 255, 0),  # green arrow
+                            color,  # green arrow
                             1,
                             tipLength=0.4,
                         )
@@ -384,7 +388,7 @@ if __name__ == "__main__":
                             big_annotated,
                             (gx_big, gy_big),
                             (ex_big, ey_big),
-                            (0, 255, 0),  # green arrow
+                            color,  # green arrow
                             max(1, int(scale_x)),
                             tipLength=0.3,
                         )
