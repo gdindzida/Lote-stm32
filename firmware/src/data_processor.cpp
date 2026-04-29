@@ -130,6 +130,7 @@ extern "C" void process_data(Payload *payload,
   payload->header.magic = MAGIC;
   payload->header.length = 0;
 
+  // Get pointer to the current buffer slot
   uint8_t *currbufferView = UserRxBufferFS;
   if (work_package_type == PROCESS_RX_2) {
     currbufferView += APP_RX_BUFFER_SIZE;

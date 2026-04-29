@@ -12,6 +12,7 @@ import serial
 
 from hil.frames import FrameItem, FrameRecord
 from hil.csv_dataset import CsvDatasetStreamer
+from hil.calibration import load_camchain
 from hil.kpi import compute_and_print_kpi
 from hil.playback import playback_recorded_frames
 from hil.plot import plot_timing
@@ -53,6 +54,13 @@ if __name__ == "__main__":
             "Path to a dataset.csv file (created by tools/calibration/create_dataset.py). "
             "The CSV must contain 'timestamp_cam' and 'image_path' columns."
         ),
+    )
+    parser.add_argument(
+        "--camchain",
+        type=str,
+        metavar="PATH",
+        required=True,
+        help="Path to camchain.yaml file containing camera calibration parameters (fx, fy, cx, cy, k1, k2).",
     )
     parser.add_argument(
         "--data-root",
@@ -119,7 +127,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--timeout",
-        type=str,
+        type=int,
         metavar="ms",
         default=None,
         help="Timeout in ms for serial connection.",
@@ -131,6 +139,15 @@ if __name__ == "__main__":
 
     if write_freq_hz is not None and write_freq_hz <= 0:
         parser.error("--write-freq must be a positive number")
+
+    # Load camera calibration
+    print(f"Loading camera calibration from: {args.camchain}")
+    calibration = load_camchain(args.camchain)
+    print(
+        f"Calibration: fx={calibration['fx']:.2f}, fy={calibration['fy']:.2f}, "
+        f"cx={calibration['cx']:.2f}, cy={calibration['cy']:.2f}, "
+        f"k1={calibration['k1']:.6f}, k2={calibration['k2']:.6f}"
+    )
 
     # Initialize CSV dataset streamer
     print(f"Using CSV dataset: {args.dataset_csv}")
@@ -209,6 +226,7 @@ if __name__ == "__main__":
             error_event,
             stop_event,
             frame_deadline_times,
+            calibration,
         ),
         daemon=True,
     )

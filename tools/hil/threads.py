@@ -34,6 +34,7 @@ def writer_thread_fn(
     error_event: threading.Event,
     stop_event: threading.Event,
     frame_deadline_times: List[float],
+    calibration: dict,
 ):
     """Reads frames from the streamer, writes them to serial, and enqueues frame data for the reader.
 
@@ -81,19 +82,46 @@ def writer_thread_fn(
     print(small_img.shape)
     img_data = small_img.tobytes()
 
-    # Build a sync packet: PacketHeader (magic + length) padded to PACKET_SIZE bytes.
-    # Padding to exactly PACKET_SIZE guarantees it is flushed as its own USB FS
-    # bulk OUT packet and is not coalesced with the following image data.
-    sync_pkt = struct.pack(HEADER_FMT, MAGIC, APP_RX_BUFFER_SIZE).ljust(
-        PACKET_SIZE, b"\x00"
+    # Get first frame metadata (dt=0 for first frame)
+    entry = streamer.entries[0]  # type: ignore
+
+    # Build PacketHeader with metadata and calibration (56 bytes total)
+    # Then pad the first packet to PACKET_SIZE to ensure it's sent separately
+    packet_header = struct.pack(
+        HEADER_FMT,
+        MAGIC,
+        APP_RX_BUFFER_SIZE,
+        0.0,  # dt = 0 for first frame
+        float(entry.get("p_x", 0.0)),
+        float(entry.get("p_y", 0.0)),
+        float(entry.get("p_z", 0.0)),
+        float(entry.get("roll", 0.0)),
+        float(entry.get("pitch", 0.0)),
+        float(entry.get("yaw", 0.0)),
+        calibration["fx"],
+        calibration["fy"],
+        calibration["cx"],
+        calibration["cy"],
+        calibration["k1"],
+        calibration["k2"],
     )
+
+    print("debug: size of packet header: ", len(packet_header))
+
+    # Pad to PACKET_SIZE to ensure separate USB packet
+    sync_pkt = packet_header.ljust(PACKET_SIZE, b"\x00")
+
+    print("debug: size of sync packet: ", len(sync_pkt))
+    print("debug: size of image data: ", len(img_data))
 
     # Acquire one MCU buffer slot for the first frame (always available at start).
     # frame_buffer_sem.acquire()
     frame_write_time = time.time()
     # t0 is the absolute origin for all subsequent deadlines.
     t0: float = frame_write_time
+    print("debug: syncing")
     ser.write(sync_pkt)
+    print("debug: writing image")
     ser.write(img_data)
     frame_write_times.append(frame_write_time)
     frame_deadline_times.append(t0)  # deadline for frame 0 is t0 by definition
@@ -168,8 +196,49 @@ def writer_thread_fn(
             print("debug: missing frame")
             continue
 
+        # Get current frame metadata from dataset
+        curr_idx = streamer.index - 1  # type: ignore
+        prev_idx = curr_idx - 1
+        entry = streamer.entries[curr_idx]  # type: ignore
+        prev_entry = streamer.entries[prev_idx]  # type: ignore
+
+        # Calculate dt from timestamps
+        curr_ts = float(entry.get("timestamp_cam", 0.0))
+        prev_ts = float(prev_entry.get("timestamp_cam", 0.0))
+        dt = curr_ts - prev_ts
+
+        # Build PacketHeader with current frame metadata and calibration
+        packet_header = struct.pack(
+            HEADER_FMT,
+            MAGIC,
+            APP_RX_BUFFER_SIZE,
+            dt,
+            float(entry.get("p_x", 0.0)),
+            float(entry.get("p_y", 0.0)),
+            float(entry.get("p_z", 0.0)),
+            float(entry.get("roll", 0.0)),
+            float(entry.get("pitch", 0.0)),
+            float(entry.get("yaw", 0.0)),
+            calibration["fx"],
+            calibration["fy"],
+            calibration["cx"],
+            calibration["cy"],
+            calibration["k1"],
+            calibration["k2"],
+        )
+
+        # Pad to PACKET_SIZE to ensure separate USB packet
+        print("debug: size of packet header: ", len(packet_header))
+
+        sync_pkt = packet_header.ljust(PACKET_SIZE, b"\x00")
+
+        print("debug: size of sync packet: ", len(sync_pkt))
+        print("debug: size of image data: ", len(img_data))
+
         frame_write_time = time.time()
+        print("debug: syncing")
         ser.write(sync_pkt)
+        print("debug: writing image")
         ser.write(img_data)
         frame_write_times.append(frame_write_time)
         frame_deadline_times.append(deadline)
@@ -232,7 +301,11 @@ def reader_thread_fn(
             # error_event.set()
             # break
 
-        magic, length = struct.unpack(HEADER_FMT, header_bytes)
+        # Unpack header: magic, length, and all the metadata/calibration fields
+        header_data = struct.unpack(HEADER_FMT, header_bytes)
+        magic = header_data[0]
+        length = header_data[1]
+        # header_data[2:] contains dt, p_x, p_y, p_z, roll, pitch, yaw, fx, fy, cx, cy, k1, k2
         print("Size of header: ", len(header_bytes))
         if magic != MAGIC:
             print(f"Reader: bad magic: {hex(magic)}")
