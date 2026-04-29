@@ -11,13 +11,12 @@ import cv2
 import serial
 
 from hil.frames import FrameItem, FrameRecord
-from hil.indoor import IndoorStreamer
+from hil.csv_dataset import CsvDatasetStreamer
 from hil.kpi import compute_and_print_kpi
 from hil.playback import playback_recorded_frames
 from hil.plot import plot_timing
-from hil.statistics import print_statistics
+from hil.stats import print_statistics
 from hil.stm32 import find_stm32_port
-from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
 
 if __name__ == "__main__":
@@ -46,14 +45,23 @@ if __name__ == "__main__":
         "Omit for maximum throughput (no throttling).",
     )
     parser.add_argument(
-        "--data-root",
+        "--dataset-csv",
         type=str,
         metavar="PATH",
         required=True,
         help=(
-            "Path to the dataset folder.  "
-            "the nav-cam folder containing img/ and nav_cam_timestamps.csv "
-            "(e.g. /path/to/insane-dataset/indoor_1_nav_cam)."
+            "Path to a dataset.csv file (created by tools/calibration/create_dataset.py). "
+            "The CSV must contain 'timestamp_cam' and 'image_path' columns."
+        ),
+    )
+    parser.add_argument(
+        "--data-root",
+        type=str,
+        metavar="PATH",
+        default=None,
+        help=(
+            "Root directory for resolving relative image paths in the CSV. "
+            "If not provided, image paths in CSV are assumed to be absolute."
         ),
     )
     parser.add_argument(
@@ -124,12 +132,15 @@ if __name__ == "__main__":
     if write_freq_hz is not None and write_freq_hz <= 0:
         parser.error("--write-freq must be a positive number")
 
-    data_root: str = args.data_root
-    print("Using dataset in ", data_root)
-
-    streamer: DatasetStreamer = IndoorStreamer(
-        data_root, None, start_frame=args.start_frame
+    # Initialize CSV dataset streamer
+    print(f"Using CSV dataset: {args.dataset_csv}")
+    streamer: CsvDatasetStreamer = CsvDatasetStreamer(
+        dataset_csv_path=args.dataset_csv,
+        data_root=args.data_root,  # May be None, CSV paths can be absolute
+        dataset_streamer_adapter=None,
+        start_frame=args.start_frame,
     )
+    data_root: Optional[str] = args.data_root
 
     port = find_stm32_port()
     ser = serial.Serial(port, timeout=args.timeout)
@@ -280,15 +291,19 @@ if __name__ == "__main__":
 
     do_kpi = args.kpi or args.plot_kpi
     if do_kpi and frame_meta_list:
-        # Derive sensors_root from data_root when not supplied.
-        sensors_root: str = args.sensors_root or data_root.replace(
-            "_nav_cam", "_sensors"
-        )
-        compute_and_print_kpi(
-            frame_meta_list=frame_meta_list,
-            data_root=data_root,
-            sensors_root=sensors_root,
-            plot_kpi=args.plot_kpi,
-        )
+        # KPI computation requires valid data_root and sensors_root
+        if data_root is None:
+            print("KPI requested but --data-root not provided — skipping.")
+        else:
+            # Derive sensors_root from data_root when not supplied.
+            sensors_root: str = args.sensors_root or data_root.replace(
+                "_nav_cam", "_sensors"
+            )
+            compute_and_print_kpi(
+                frame_meta_list=frame_meta_list,
+                data_root=data_root,
+                sensors_root=sensors_root,
+                plot_kpi=args.plot_kpi,
+            )
     elif do_kpi:
         print("KPI requested but no frames were successfully received — skipping.")

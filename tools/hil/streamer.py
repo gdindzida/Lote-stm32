@@ -20,7 +20,7 @@ class DatasetStreamer(ABC):
     @abstractmethod
     def next(
         self,
-    ) -> Optional[Tuple[np.ndarray[Any, Any] | None, np.ndarray[Any, Any] | None]]:
+    ) -> Optional[np.ndarray[Any, Any] | None]:
         """Return the next resource. Returns None when dataset is exhausted."""
         pass
 

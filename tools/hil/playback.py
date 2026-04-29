@@ -61,10 +61,10 @@ def playback_recorded_frames(
             frame_delay_ms = playback_delay_ms  # type: ignore[assignment]
 
         small_annotated = cv2.cvtColor(frame.small_img.copy(), cv2.COLOR_GRAY2BGR)
-        big_annotated = cv2.cvtColor(frame.left_img.copy(), cv2.COLOR_GRAY2BGR)
+        big_annotated = cv2.resize(small_annotated, (800, 800))
 
-        scale_x = frame.left_img.shape[1] / IMG_SCALE_SIZE[0]
-        scale_y = frame.left_img.shape[0] / IMG_SCALE_SIZE[1]
+        scale_x = 800 / IMG_SCALE_SIZE[0]
+        scale_y = 800 / IMG_SCALE_SIZE[1]
 
         # ------------------------------------------------------------------
         # Overlay optical-flow vectors on the small (96×96) image.

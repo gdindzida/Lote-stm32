@@ -266,14 +266,10 @@ def compute_velocity_gt_indoor(
 
     # --- Load sensor (mocap / odometry) data ---
     mocap_csv = os.path.join(sensors_root, "mocap_vehicle_data.csv")
-    odom_csv = os.path.join(sensors_root, "rs_odom.csv")
 
     if os.path.isfile(mocap_csv):
         sensor_csv = mocap_csv
         print(f"  GT velocity source: mocap  ({sensor_csv})")
-    elif os.path.isfile(odom_csv):
-        sensor_csv = odom_csv
-        print(f"  GT velocity source: rs_odom  ({sensor_csv})")
     else:
         raise FileNotFoundError(
             f"No ground-truth sensor file found in sensors_root: {sensors_root}\n"

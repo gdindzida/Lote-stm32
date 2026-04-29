@@ -4,6 +4,7 @@ import threading
 import time
 from typing import List, Optional
 
+from cv2 import resize
 import serial
 
 from hil.frames import FrameItem, FrameRecord, scale_image
@@ -48,13 +49,21 @@ def writer_thread_fn(
     ``missed_frames[0]``; its absolute timestamp is appended to
     ``missed_frame_times``.
 
-    Timing uses absolute deadlines anchored to the first-frame write time
-    (``t0``).  Deadline for frame *n* is ``t0 + n * period``.  This prevents
-    drift accumulation that occurs when sleeping only for the remaining portion
-    of the previous interval.  The deadline of every successfully sent frame is
-    appended to ``frame_deadline_times``; the actual write timestamp is appended
+    Timing behavior:
+    - When write_freq_hz is defined: Uses camera timestamps from the CSV dataset
+      to compute inter-frame delays. This preserves the original timing from the dataset.
+    - When write_freq_hz is None: Maximum throughput mode (no throttling).
+
+    The deadline of every successfully sent frame is appended to
+    ``frame_deadline_times``; the actual write timestamp is appended
     to ``frame_write_times``.
     """
+    # Check if streamer provides timestamps (CsvDatasetStreamer always does)
+    use_dataset_timestamps = write_freq_hz is None
+
+    if use_dataset_timestamps and write_freq_hz is not None:
+        print("Using camera timestamps from dataset for frame timing")
+
     period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
 
     # --- First frame (sent before the main loop) ---
@@ -65,7 +74,7 @@ def writer_thread_fn(
         frame_queue.put(None)
         return
 
-    left_img, right_img = result
+    left_img = result
 
     if left_img is None:
         print("Left image is None!")
@@ -73,15 +82,9 @@ def writer_thread_fn(
         frame_queue.put(None)
         return
 
-    if right_img is None:
-        print("Right image is None!")
-        error_event.set()
-        frame_queue.put(None)
-        return
-
     frame_number: int = 0
 
-    small_img = scale_image(left_img)
+    small_img = left_img
     print(left_img.shape)
     print(small_img.shape)
     img_data = small_img.tobytes()
@@ -114,26 +117,51 @@ def writer_thread_fn(
             print("Images are None!")
             continue
 
-        left_img, right_img = result
+        left_img = result
 
         if left_img is None:
             print("Left image is None!")
             continue
 
-        if right_img is None:
-            print("Right image is None!")
-            continue
-
         frame_number += 1
 
-        small_img = scale_image(left_img)
+        small_img = left_img
         img_data = small_img.tobytes()
 
-        # Absolute-deadline throttling: sleep until the scheduled send time for
-        # this frame number.  Using an absolute deadline (t0 + n * period) rather
-        # than sleeping for "period - elapsed" prevents drift accumulation across
-        # frames.
-        if period > 0.0:
+        # Compute deadline for this frame:
+        # - If dataset timestamps available: use relative time from dataset
+        # - Otherwise: use fixed-frequency timing with absolute deadlines
+        if use_dataset_timestamps:
+            # Get timestamps for current and previous frames from the dataset
+            # streamer.index was incremented by next(), so current frame is at index-1
+            curr_idx = streamer.index - 1  # type: ignore
+            prev_idx = curr_idx - 1
+
+            # Get dataset timestamps
+            curr_ts = streamer.get_timestamp(curr_idx)  # type: ignore
+            prev_ts = streamer.get_timestamp(prev_idx)  # type: ignore
+
+            # Calculate inter-frame delay from dataset
+            dataset_delay = curr_ts - prev_ts
+            # Schedule this frame relative to when we sent the previous frame
+            deadline = frame_write_times[-1] + dataset_delay
+            sleep_time = deadline - time.time()
+            print(
+                "curr index: ",
+                curr_idx,
+                ", prev index: ",
+                prev_idx,
+                ", sleep time: ",
+                sleep_time,
+                ", curr timestamp: ",
+                curr_ts,
+                ", prev timestamp: ",
+                prev_ts,
+            )
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+        elif period > 0.0:
+            # Fixed-frequency timing: absolute deadline to prevent drift
             deadline = t0 + frame_number * period
             sleep_time = deadline - time.time()
             if sleep_time > 0:
@@ -150,6 +178,7 @@ def writer_thread_fn(
         if not frame_buffer_sem.acquire(blocking=False):
             missed_frames[0] += 1
             missed_frame_times.append(time.time())
+            print("debug: missing frame")
             continue
 
         frame_write_time = time.time()
@@ -157,9 +186,7 @@ def writer_thread_fn(
         ser.write(img_data)
         frame_write_times.append(frame_write_time)
         frame_deadline_times.append(deadline)
-        frame_queue.put(
-            FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
-        )
+        frame_queue.put(FrameItem(small_img.copy(), frame_write_time, frame_number))
 
     # Signal the reader that no more frames will be written (None = sentinel)
     frame_queue.put(None)
@@ -206,9 +233,9 @@ def reader_thread_fn(
         print(f"Frames read: {iter} / {total}")
 
         small_img = item.small_img
-        left_img = item.left_img
 
         # Read header
+        print("debug: waiting for frame...")
         header_bytes = ser.read(struct.calcsize(HEADER_FMT))
         if len(header_bytes) < struct.calcsize(HEADER_FMT):
             print("Reader: timeout waiting for header")
@@ -278,7 +305,6 @@ def reader_thread_fn(
             recorded_frames.append(
                 FrameRecord(
                     small_img=small_img,
-                    left_img=left_img,
                     payload=payload,
                     meta=meta,
                     meta_size=meta_size,
