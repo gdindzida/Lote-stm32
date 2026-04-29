@@ -40,7 +40,9 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, List
+from hil.plot import plot_velocities
+from tools.hil.frames import FrameReadEvent
 
 try:
     import numpy as np
@@ -123,7 +125,7 @@ def _nearest_index(sorted_times: "np.ndarray", query_time: float) -> int:
 
 
 def compute_and_print_kpi(
-    frame_meta_list: "Sequence[tuple[int, float, float, float]]",
+    frame_reads: List[FrameReadEvent],
     data_root: str,
     sensors_root: str,
     plot_kpi: bool = False,
@@ -146,10 +148,10 @@ def compute_and_print_kpi(
     print("Computing velocity KPI…")
     try:
         # Extract predicted velocities from STM32
-        frame_numbers = [fm[0] for fm in frame_meta_list]
-        vx_pred = np.array([fm[1] for fm in frame_meta_list], dtype=np.float64)
-        vy_pred = np.array([fm[2] for fm in frame_meta_list], dtype=np.float64)
-        omega_pred = np.array([fm[3] for fm in frame_meta_list], dtype=np.float64)
+        frame_numbers = [fm.frame_number for fm in frame_reads]
+        vx_pred = np.array([fm.meta.vx for fm in frame_reads], dtype=np.float64)
+        vy_pred = np.array([fm.meta.vy for fm in frame_reads], dtype=np.float64)
+        omega_pred = np.array([fm.meta.omega for fm in frame_reads], dtype=np.float64)
 
         # Compute ground truth velocities from position/orientation changes over time
         vx_gt, vy_gt, omega_gt = compute_velocity_gt_indoor(
@@ -185,17 +187,8 @@ def compute_and_print_kpi(
             )
 
         if plot_kpi:
-            from hil.plot import plot_velocity_xyz
+            plot_velocities(vx_pred, vy_pred, omega_pred, vx_gt, vy_gt, omega_gt)
 
-            plot_velocity_xyz(
-                frame_numbers,
-                vx_pred,
-                vy_pred,
-                omega_pred,
-                vx_gt,
-                vy_gt,
-                omega_gt,
-            )
     except Exception as exc:
         print(f"KPI computation failed: {exc}")
 

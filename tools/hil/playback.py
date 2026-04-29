@@ -10,11 +10,11 @@ from typing import List, Optional
 
 import cv2
 
-from hil.frames import FrameRecord, IMG_SCALE_SIZE
+from hil.frames import FrameReadEvent, IMG_SCALE_SIZE
 
 
 def playback_recorded_frames(
-    recorded_frames: List[FrameRecord],
+    frame_reads: List[FrameReadEvent],
     playback_delay_ms: Optional[int],
     playback_realtime: bool,
     save_dir: Optional[str] = None,
@@ -37,11 +37,11 @@ def playback_recorded_frames(
     print("")
     if playback_realtime:
         print(
-            f"Starting realtime playback of {len(recorded_frames)} frames (original timings)..."
+            f"Starting realtime playback of {len(frame_reads)} frames (original timings)..."
         )
     else:
         print(
-            f"Starting playback of {len(recorded_frames)} frames (delay={playback_delay_ms}ms)..."
+            f"Starting playback of {len(frame_reads)} frames (delay={playback_delay_ms}ms)..."
         )
 
     # Create the save directory once before the loop (if requested).
@@ -49,18 +49,18 @@ def playback_recorded_frames(
         os.makedirs(save_dir, exist_ok=True)
         print(f"Saving annotated big images to: {save_dir}")
 
-    for idx, frame in enumerate(recorded_frames):
+    for idx, frame in enumerate(frame_reads):
         if playback_realtime:
-            if idx + 1 < len(recorded_frames):
+            if idx + 1 < len(frame_reads):
                 frame_delay_ms = int(
-                    (recorded_frames[idx + 1].timestamp - frame.timestamp) * 1000
+                    (frame_reads[idx + 1].read_time - frame.read_time) * 1000
                 )
             else:
                 frame_delay_ms = 1  # last frame: just wait 1ms
         else:
             frame_delay_ms = playback_delay_ms  # type: ignore[assignment]
 
-        small_annotated = cv2.cvtColor(frame.small_img.copy(), cv2.COLOR_GRAY2BGR)
+        small_annotated = cv2.cvtColor(frame.image.copy(), cv2.COLOR_GRAY2BGR)
         big_annotated = cv2.resize(small_annotated, (800, 800))
 
         scale_x = 800 / IMG_SCALE_SIZE[0]

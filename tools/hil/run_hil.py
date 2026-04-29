@@ -4,19 +4,19 @@ import sys
 import threading
 import time
 import argparse
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
-import cv2
 import serial
 
-from hil.frames import FrameItem, FrameRecord
+from hil.frames import FrameItem, FrameWriteEvent, FrameReadEvent
 from hil.csv_dataset import CsvDatasetStreamer
 from hil.calibration import load_camchain
+
 from hil.kpi import compute_and_print_kpi
 from hil.playback import playback_recorded_frames
-from hil.plot import plot_timing
-from hil.stats import print_statistics
+from hil.plot import plot_frame_metrics
+from hil.stats import compute_and_print_metrics
 from hil.stm32 import find_stm32_port
 from hil.threads import reader_thread_fn, writer_thread_fn
 
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         "--write-freq",
         type=float,
         metavar="HZ",
-        default=30,
+        default=None,
         help="Frequency (in Hz) at which frames are written to the serial port. "
         "Omit for maximum throughput (no throttling).",
     )
@@ -67,6 +67,7 @@ if __name__ == "__main__":
         type=str,
         metavar="PATH",
         default=None,
+        required=True,
         help=(
             "Root directory for resolving relative image paths in the CSV. "
             "If not provided, image paths in CSV are assumed to be absolute."
@@ -134,7 +135,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    do_record = args.playback is not None or args.playback_realtime
     write_freq_hz: Optional[float] = args.write_freq
 
     if write_freq_hz is not None and write_freq_hz <= 0:
@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     # Load camera calibration
     print(f"Loading camera calibration from: {args.camchain}")
-    calibration = load_camchain(args.camchain)
+    calibration: Dict[str, float] = load_camchain(args.camchain)
     print(
         f"Calibration: fx={calibration['fx']:.2f}, fy={calibration['fy']:.2f}, "
         f"cx={calibration['cx']:.2f}, cy={calibration['cy']:.2f}, "
@@ -170,27 +170,14 @@ if __name__ == "__main__":
     else:
         print("Write frequency: unlimited (max throughput)")
 
-    frame_write_times: List[float] = []
-    frame_deadline_times: List[float] = []  # absolute deadline for each sent frame
-    frame_loop_times: List[float] = []  # write-to-read latency per frame (seconds)
-    process_elapsed_times: List[float] = []
-    peak_memory: List[float] = [0.0, 0.0]  # [stack, heap]
-    recorded_frames: List[FrameRecord] = []
-    missed_frames: List[int] = [0]  # [missed_frame_count]
-    missed_frame_times: List[float] = []  # absolute timestamps of each missed frame
-    # (frame_number, vx, vy, omega) per received frame — populated when --kpi or --plot-kpi
-    frame_meta_list: "List[tuple[int, float, float, float]] | None" = (
-        [] if (args.kpi or args.plot_kpi) else None
-    )
+    frame_writes: List[FrameWriteEvent] = []
+    frame_reads: List[FrameReadEvent] = []
 
     print("Starting clip playback...")
     print("Press 'q' + Enter at any time to stop streaming early.")
 
     frame_queue: "queue.Queue[Optional[FrameItem]]" = queue.Queue(maxsize=0)
-    # Models the STM32's 2-frame receive buffer.  The writer acquires a slot
-    # before each transmission; the reader releases it only after the MCU
-    # serial response has been fully received.
-    frame_buffer_sem = threading.Semaphore(2)
+    frame_buffer_sem = threading.Semaphore(1)
     error_event = threading.Event()
     stop_event = threading.Event()
 
@@ -216,16 +203,12 @@ if __name__ == "__main__":
         args=(
             ser,
             streamer,
-            frame_queue,
             write_freq_hz,
-            do_record,
-            frame_write_times,
-            missed_frames,
-            missed_frame_times,
+            frame_writes,
+            frame_queue,
             frame_buffer_sem,
             error_event,
             stop_event,
-            frame_deadline_times,
             calibration,
         ),
         daemon=True,
@@ -236,17 +219,12 @@ if __name__ == "__main__":
         name="ser-reader",
         args=(
             ser,
+            frame_reads,
             frame_queue,
-            do_record,
-            process_elapsed_times,
-            recorded_frames,
-            peak_memory,
             frame_buffer_sem,
             error_event,
             streamer.total,
-            frame_loop_times,
         ),
-        kwargs={"frame_meta_list": frame_meta_list},
         daemon=True,
     )
 
@@ -264,51 +242,26 @@ if __name__ == "__main__":
     reader.join()
     stop_event.set()  # unblock keyboard listener if stream finished naturally
 
-    # Write-to-read latency per frame: collected by the reader as each MCU
-    # response is fully received.  One entry per successfully processed frame.
-    loop_times = frame_loop_times
-
     if error_event.is_set():
         print("An error occurred during serial communication. Aborting.")
         raise SystemExit(1)
 
-    peak_stack_memory = peak_memory[0]
-    peak_heap_memory = peak_memory[1]
-
     elapsed_time = time.time() - start_time
 
-    print_statistics(
-        elapsed_time=elapsed_time,
-        write_freq_hz=write_freq_hz,
-        frame_write_times=frame_write_times,
-        frame_loop_times=loop_times,
-        process_elapsed_times=process_elapsed_times,
-        peak_stack_memory=peak_stack_memory,
-        peak_heap_memory=peak_heap_memory,
-        missed_frames_count=missed_frames[0],
-    )
+    # Statitics
+    print("")
+    print("Statistics")
 
-    if args.playback is not None or args.playback_realtime:
-        playback_recorded_frames(
-            recorded_frames=recorded_frames,
-            playback_delay_ms=args.playback,
-            playback_realtime=args.playback_realtime,
-            save_dir=args.save_dir,
-        )
+    print("")
+    print("Total elapsed time(s): ", elapsed_time)
+    print("Desired freq: ", write_freq_hz)
+    compute_and_print_metrics(frame_writes, frame_reads)
 
     if args.plot:
-        plot_timing(
-            loop_times,
-            process_elapsed_times,
-            missed_frame_times,
-            start_time,
-            frame_write_times,
-            frame_deadline_times,
-            write_freq_hz,
-        )
+        plot_frame_metrics(frame_writes, frame_reads)
 
     do_kpi = args.kpi or args.plot_kpi
-    if do_kpi and frame_meta_list:
+    if do_kpi:
         # KPI computation requires valid data_root and sensors_root
         if data_root is None:
             print("KPI requested but --data-root not provided — skipping.")
@@ -318,10 +271,18 @@ if __name__ == "__main__":
                 "_nav_cam", "_sensors"
             )
             compute_and_print_kpi(
-                frame_meta_list=frame_meta_list,
+                frame_reads=frame_reads,
                 data_root=data_root,
                 sensors_root=sensors_root,
                 plot_kpi=args.plot_kpi,
             )
     elif do_kpi:
         print("KPI requested but no frames were successfully received — skipping.")
+
+    if args.playback is not None or args.playback_realtime:
+        playback_recorded_frames(
+            frame_reads=frame_reads,
+            playback_delay_ms=args.playback,
+            playback_realtime=args.playback_realtime,
+            save_dir=args.save_dir,
+        )

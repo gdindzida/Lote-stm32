@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import csv
 import os
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Dict
 
 import cv2
 import numpy as np
@@ -55,14 +55,13 @@ class CsvDatasetStreamer:
 
         print("cwd              : ", os.getcwd())
         print("dataset CSV      : ", self.dataset_csv_path)
-        if data_root:
-            print("data root        : ", self.data_root)
+        print("data root        : ", self.data_root)
 
         if not os.path.isfile(self.dataset_csv_path):
             raise FileNotFoundError(f"Dataset CSV not found: {self.dataset_csv_path}")
 
         # Load dataset entries
-        self.entries: List[dict] = self.load_dataset()
+        self.entries: List[Dict[str, Any]] = self.load_dataset()
 
         if not self.entries:
             raise ValueError(
@@ -70,7 +69,6 @@ class CsvDatasetStreamer:
             )
 
         n_entries = len(self.entries)
-        # Convert 1-based start_frame to a 0-based list index and clamp.
         start_index: int = max(0, min(start_frame - 1, n_entries - 1))
         if start_index > 0:
             print(f"Skipping to frame {start_frame} (index {start_index})")
@@ -93,13 +91,13 @@ class CsvDatasetStreamer:
     # Public methods
     # ------------------------------------------------------------------
 
-    def load_dataset(self) -> List[dict]:
+    def load_dataset(self) -> List[Dict[str, Any]]:
         """Parse dataset.csv and return a list of entry dicts.
 
         Each dict contains all columns from the CSV, with keys matching
         the column names.
         """
-        entries: List[dict] = []
+        entries: List[Dict[str, Any]] = []
 
         with open(self.dataset_csv_path, newline="") as fh:
             reader = csv.DictReader(fh)
@@ -133,7 +131,7 @@ class CsvDatasetStreamer:
                     continue
 
                 # Store the entry with the full path for easy loading
-                entry = dict(row)
+                entry: Dict[str, Any] = dict(row)
                 entry["_full_image_path"] = full_path
                 entries.append(entry)
 
