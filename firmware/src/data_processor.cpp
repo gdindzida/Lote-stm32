@@ -53,6 +53,9 @@ void process_stride(const uint8_t *curr_img_stride,
           static_cast<int16_t>(current_start.row + search_index.row),
           static_cast<int16_t>(current_start.col + search_index.col), false};
 
+      int psum = 0;
+      int psum2 = 0;
+
       for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
         for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
           int current_val = static_cast<int>(prev_img_stride[coord_to_index(
@@ -66,7 +69,18 @@ void process_stride(const uint8_t *curr_img_stride,
           }
 
           sad += diff;
+
+          psum += current_val;
+          psum2 += current_val * current_val;
         }
+      }
+
+      // TODO move out of the double for loop!
+      float mean = psum / 64;
+      float variance = (psum2 / 64) - (mean * mean);
+
+      if (variance < VAR_MIN) {
+        break;
       }
 
       if (sad < min_sad) {
@@ -86,7 +100,7 @@ void process_stride(const uint8_t *curr_img_stride,
       uint8_t gy = SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + stride_row_offset;
 
       int32_t rx = static_cast<int32_t>(gx) - CENTER_COL;
-      int32_t ry = static_cast<int32_t>(gy) - CENTER_ROW;
+      int32_t ry = CENTER_ROW - static_cast<int32_t>(gy);
 
       lse_data.N++;
       lse_data.u_sum += u;
@@ -108,7 +122,7 @@ LSE_solution solve_lse(LSE_data &lse_data) {
                          (lse_data.ry_sum * lse_data.u_sum) +
                          (lse_data.rx_sum * lse_data.v_sum)) /
       static_cast<float>((lse_data.rx_sum * lse_data.rx_sum) +
-                         (lse_data.ry2_sum * lse_data.ry2_sum) -
+                         (lse_data.ry_sum * lse_data.ry_sum) -
                          (lse_data.N * (lse_data.rx2_sum + lse_data.ry2_sum)));
 
   sol.tx = (static_cast<float>(lse_data.u_sum) +
@@ -178,12 +192,12 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.sum_v = lse_data.v_sum;
   payload->metadata.num_points = lse_data.N;
   payload->metadata.vx =
-      MAX(MIN(solution.u * current_packet_header.h /
+      MAX(MIN(-solution.u * current_packet_header.h /
                   (current_packet_header.fx * current_packet_header.dt),
               1),
           -1);
   payload->metadata.vy =
-      MAX(MIN(solution.v * current_packet_header.h /
+      MAX(MIN(-solution.v * current_packet_header.h /
                   (current_packet_header.fy * current_packet_header.dt),
               1),
           -1);

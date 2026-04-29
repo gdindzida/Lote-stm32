@@ -76,25 +76,25 @@ def writer_thread_fn(
 
     entry: Dict[str, Any] = streamer.entries[0]  # type: ignore
 
-    print(
-        "debug: Packet header contains: ",
-        MAGIC,
-        APP_RX_BUFFER_SIZE,
-        0.0,  # dt = 0 for first frame
-        float(entry.get("p_z", 0.0)),
-        float(entry.get("acc_x", 0.0)),
-        float(entry.get("acc_y", 0.0)),
-        float(entry.get("acc_z", 0.0)),
-        float(entry.get("gyro_x", 0.0)),
-        float(entry.get("gyro_y", 0.0)),
-        float(entry.get("gyro_z", 0.0)),
-        calibration["fx"],
-        calibration["fy"],
-        calibration["cx"],
-        calibration["cy"],
-        calibration["k1"],
-        calibration["k2"],
-    )
+    # print(
+    #     "debug: Packet header contains: ",
+    #     MAGIC,
+    #     APP_RX_BUFFER_SIZE,
+    #     0.0,  # dt = 0 for first frame
+    #     float(entry.get("p_z", 0.0)),
+    #     float(entry.get("acc_x", 0.0)),
+    #     float(entry.get("acc_y", 0.0)),
+    #     float(entry.get("acc_z", 0.0)),
+    #     float(entry.get("gyro_x", 0.0)),
+    #     float(entry.get("gyro_y", 0.0)),
+    #     float(entry.get("gyro_z", 0.0)),
+    #     calibration["fx"],
+    #     calibration["fy"],
+    #     calibration["cx"],
+    #     calibration["cy"],
+    #     calibration["k1"],
+    #     calibration["k2"],
+    # )
     packet_header = struct.pack(
         SEND_HEADER_FMT,
         MAGIC,
@@ -147,25 +147,25 @@ def writer_thread_fn(
         dt = curr_ts - prev_ts
 
         # Build PacketHeader with current frame metadata and calibration
-        print(
-            "debug: Packet header contains: ",
-            MAGIC,
-            APP_RX_BUFFER_SIZE,
-            dt,  # dt = 0 for first frame
-            float(entry.get("p_z", 0.0)),
-            float(entry.get("acc_x", 0.0)),
-            float(entry.get("acc_y", 0.0)),
-            float(entry.get("acc_z", 0.0)),
-            float(entry.get("gyro_x", 0.0)),
-            float(entry.get("gyro_y", 0.0)),
-            float(entry.get("gyro_z", 0.0)),
-            calibration["fx"],
-            calibration["fy"],
-            calibration["cx"],
-            calibration["cy"],
-            calibration["k1"],
-            calibration["k2"],
-        )
+        # print(
+        #     "debug: Packet header contains: ",
+        #     MAGIC,
+        #     APP_RX_BUFFER_SIZE,
+        #     dt,  # dt = 0 for first frame
+        #     float(entry.get("p_z", 0.0)),
+        #     float(entry.get("acc_x", 0.0)),
+        #     float(entry.get("acc_y", 0.0)),
+        #     float(entry.get("acc_z", 0.0)),
+        #     float(entry.get("gyro_x", 0.0)),
+        #     float(entry.get("gyro_y", 0.0)),
+        #     float(entry.get("gyro_z", 0.0)),
+        #     calibration["fx"],
+        #     calibration["fy"],
+        #     calibration["cx"],
+        #     calibration["cy"],
+        #     calibration["k1"],
+        #     calibration["k2"],
+        # )
         packet_header = struct.pack(
             SEND_HEADER_FMT,
             MAGIC,
