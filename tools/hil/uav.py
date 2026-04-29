@@ -20,7 +20,7 @@ class UAVStreamer(DatasetStreamer):
             <data_root>/query_images/*.png          – query (left) images
             <data_root>/reference_images/offset_0_None/*.png – reference (right) images
         """
-        self.query_folder: str = os.path.join(data_root, "query_images")
+        self.query_folder: str = os.path.join(data_root, "rectified_img")
         self.reference_folder: str = os.path.join(
             data_root, "reference_images", "offset_0_None"
         )
