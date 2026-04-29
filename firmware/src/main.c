@@ -47,11 +47,11 @@ int main(void) {
       if (isFirst == 0) {
         process_data(&payload, work_package_type);
         length = sizeof(Payload); // sizeof(PacketHeader) + sizeof(Metadata);
+        memcpy(UserTxBufferFS, &payload, length);
+        CDC_Transmit_FS(UserTxBufferFS, length);
       } else {
         isFirst = 0;
       }
-      memcpy(UserTxBufferFS, &payload, length);
-      CDC_Transmit_FS(UserTxBufferFS, length);
     }
   }
 }

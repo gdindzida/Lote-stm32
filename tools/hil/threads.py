@@ -94,7 +94,7 @@ def writer_thread_fn(
     )
 
     # Acquire one MCU buffer slot for the first frame (always available at start).
-    frame_buffer_sem.acquire()
+    # frame_buffer_sem.acquire()
     frame_write_time = time.time()
     # t0 is the absolute origin for all subsequent deadlines.
     t0: float = frame_write_time

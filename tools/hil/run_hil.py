@@ -1,28 +1,22 @@
 import os
 import queue
 import statistics
-import struct
 import sys
 import threading
 import time
 import argparse
 from typing import List, Optional
 
-from cycler import V
-
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
 import cv2
 import serial
 
 from hil.frames import FrameItem, FrameRecord, IMG_SCALE_SIZE
-from hil.uav import UAVStreamer
 from hil.indoor import IndoorStreamer
-from hil.protocol import COORD_FMT
 from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
 import numpy as np
-
 from hil.plot import plot_predictions, plot_timing, plot_velocity_xy
 from hil.kpi import (
     load_ground_truth,
@@ -65,22 +59,8 @@ if __name__ == "__main__":
         required=True,
         help=(
             "Path to the dataset folder.  "
-            "For UAV (--dataset-type uav): a split folder containing "
-            "query_images/ and reference_images/.  "
-            "For indoor (--dataset-type indoor): the nav-cam folder "
-            "containing img/ and nav_cam_timestamps.csv "
+            "the nav-cam folder containing img/ and nav_cam_timestamps.csv "
             "(e.g. /path/to/insane-dataset/indoor_1_nav_cam)."
-        ),
-    )
-    parser.add_argument(
-        "--dataset-type",
-        type=str,
-        choices=["uav", "indoor"],
-        default="uav",
-        help=(
-            "Dataset type.  "
-            "'uav'    – UAV split (default).  "
-            "'indoor' – INSANE indoor nav-cam dataset."
         ),
     )
     parser.add_argument(
@@ -93,7 +73,6 @@ if __name__ == "__main__":
             "(e.g. /path/to/insane-dataset/indoor_1_sensors).  "
             "When omitted the path is auto-derived from --data-root by "
             "replacing the trailing '_nav_cam' suffix with '_sensors'.  "
-            "Only used when --dataset-type indoor."
         ),
     )
     parser.add_argument(
@@ -104,7 +83,6 @@ if __name__ == "__main__":
         help=(
             "1-based frame number at which to start streaming "
             "(default: 1000).  Frames before this number are skipped.  "
-            "Only applied when --dataset-type indoor."
         ),
     )
     parser.add_argument(
@@ -119,31 +97,21 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="After the run, compute and print accuracy KPI (MAE, RMSE, R², …) comparing "
-        "the STM32's tx/ty/theta estimates to ground truth.",
+        "the STM32's vx/vy/omega estimates to ground truth.",
     )
     parser.add_argument(
         "--plot-kpi",
         action="store_true",
         default=False,
-        help="After the run, display a timeseries plot of tx, ty and theta "
+        help="After the run, display a timeseries plot of vx, vy and omega"
         "(predicted vs. ground truth).  Implies --kpi.",
-    )
-    parser.add_argument(
-        "--gsd",
-        type=float,
-        metavar="M_PER_PX",
-        default=0.0,
-        help="Ground Sample Distance in metres per pixel for the 96×96 image used by the "
-        "STM32.  When omitted (or 0), it is auto-computed from the altitude column in "
-        "query.csv and --hfov.",
     )
     parser.add_argument(
         "--hfov",
         type=float,
         metavar="DEG",
         default=101.0,
-        help="Camera horizontal field of view in degrees (default: 60).  Used to "
-        "auto-compute the GSD from altitude when --gsd is not provided.",
+        help="Camera horizontal field of view in degrees (default: 101).",
     )
     parser.add_argument(
         "--vfov",
@@ -151,8 +119,7 @@ if __name__ == "__main__":
         metavar="DEG",
         default=114,
         help="Camera vertical field of view in degrees.  Defaults to --hfov (square "
-        "sensor).  Provide this when VFOV differs from HFOV so that the ty (North) "
-        "ground truth uses the correct per-axis GSD.",
+        "sensor).  Provide this when VFOV differs from HFOV.",
     )
     parser.add_argument(
         "--save-dir",
@@ -164,6 +131,13 @@ if __name__ == "__main__":
         "automatically if it does not exist.  Only has effect when --playback or "
         "--playback-realtime is also specified.",
     )
+    parser.add_argument(
+        "--timeout",
+        type=str,
+        metavar="ms",
+        default=None,
+        help="Timeout in ms for serial connection.",
+    )
     args = parser.parse_args()
 
     do_record = args.playback is not None or args.playback_realtime
@@ -173,19 +147,14 @@ if __name__ == "__main__":
         parser.error("--write-freq must be a positive number")
 
     data_root: str = args.data_root
-    print("Entering ", data_root)
+    print("Using dataset in ", data_root)
 
-    dataset_type: str = args.dataset_type
-
-    if dataset_type == "indoor":
-        streamer: DatasetStreamer = IndoorStreamer(
-            data_root, None, start_frame=args.start_frame
-        )
-    else:
-        streamer = UAVStreamer(data_root, None)
+    streamer: DatasetStreamer = IndoorStreamer(
+        data_root, None, start_frame=args.start_frame
+    )
 
     port = find_stm32_port()
-    ser = serial.Serial(port, timeout=1000)
+    ser = serial.Serial(port, timeout=args.timeout)
     print(f"Connected to {port}")
 
     if write_freq_hz is not None:
@@ -203,7 +172,7 @@ if __name__ == "__main__":
     recorded_frames: List[FrameRecord] = []
     missed_frames: List[int] = [0]  # [missed_frame_count]
     missed_frame_times: List[float] = []  # absolute timestamps of each missed frame
-    # (frame_number, tx, ty, theta) per received frame — populated when --kpi or --plot-kpi
+    # (frame_number, vx, vy, omega) per received frame — populated when --kpi or --plot-kpi
     frame_meta_list: "List[tuple[int, float, float, float]] | None" = (
         [] if (args.kpi or args.plot_kpi) else None
     )
@@ -485,33 +454,25 @@ if __name__ == "__main__":
             gt_px: "np.ndarray | None" = None
             gt_py: "np.ndarray | None" = None
 
-            if dataset_type == "indoor":
-                # Derive sensors_root from data_root when not supplied.
-                sensors_root: str = args.sensors_root or data_root.replace(
-                    "_nav_cam", "_sensors"
-                )
-                (
-                    tx_gt,
-                    ty_gt,
-                    theta_gt,
-                    gsd_x,
-                    gsd_y,
-                    gt_px,
-                    gt_py,
-                ) = load_ground_truth_indoor(
-                    data_root,
-                    sensors_root=sensors_root,
-                    gsd_m_per_px=args.gsd,
-                    hfov_deg=args.hfov,
-                    vfov_deg=args.vfov,
-                )
-            else:
-                tx_gt, ty_gt, theta_gt, gsd_x, gsd_y = load_ground_truth(
-                    data_root,
-                    gsd_m_per_px=args.gsd,
-                    hfov_deg=args.hfov,
-                    vfov_deg=args.vfov,
-                )
+            # Derive sensors_root from data_root when not supplied.
+            sensors_root: str = args.sensors_root or data_root.replace(
+                "_nav_cam", "_sensors"
+            )
+            (
+                tx_gt,
+                ty_gt,
+                theta_gt,
+                gsd_x,
+                gsd_y,
+                gt_px,
+                gt_py,
+            ) = load_ground_truth_indoor(
+                data_root,
+                sensors_root=sensors_root,
+                gsd_m_per_px=args.gsd,
+                hfov_deg=args.hfov,
+                vfov_deg=args.vfov,
+            )
 
             frame_numbers = [fm[0] for fm in frame_meta_list]
             tx_pred = [fm[1] for fm in frame_meta_list]
