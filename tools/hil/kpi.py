@@ -1040,3 +1040,171 @@ def print_kpi_report(
         f"    Max err : {result.translation_max:>10.4f} {unit_trans}\n"
     )
     print("=" * 70)
+
+
+# ---------------------------------------------------------------------------
+# Velocity ground truth computation (indoor dataset)
+# ---------------------------------------------------------------------------
+
+
+def compute_velocity_gt_indoor(
+    data_root: str,
+    sensors_root: str,
+    frame_numbers: Sequence[int],
+) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray"]:
+    """Compute ground-truth velocities (vx, vy, omega) for indoor dataset frames.
+
+    Computes velocity as the rate of change of position and orientation over time
+    from mocap or odometry data, aligned to camera timestamps.
+
+    Parameters
+    ----------
+    data_root:
+        Path to the nav-cam folder (e.g. ``…/indoor_1_nav_cam``).
+        Must contain ``nav_cam_timestamps.csv``.
+    sensors_root:
+        Path to the matching sensors folder (e.g. ``…/indoor_1_sensors``).
+        Must contain ``mocap_vehicle_data.csv`` (preferred) or ``rs_odom.csv``.
+    frame_numbers:
+        Dataset frame indices for which to compute ground truth velocities.
+
+    Returns
+    -------
+    vx_gt, vy_gt, omega_gt : np.ndarray, shape (len(frame_numbers),)
+        Ground-truth velocity arrays aligned with *frame_numbers*.
+        vx, vy in m/s (velocity in x/y directions),
+        omega in rad/s (angular velocity around z-axis).
+        Entries are ``NaN`` when velocity cannot be computed (e.g. first frame,
+        or when timestamps are too close).
+
+    Raises
+    ------
+    FileNotFoundError
+        If required CSV files are not found.
+    """
+    import csv as _csv
+
+    # --- Load camera timestamps ---
+    cam_csv = os.path.join(data_root, "nav_cam_timestamps.csv")
+    if not os.path.isfile(cam_csv):
+        raise FileNotFoundError(
+            f"nav_cam_timestamps.csv not found in data_root: {data_root}"
+        )
+
+    cam_times: list[float] = []
+    with open(cam_csv, newline="") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                cam_times.append(float(parts[1]))
+            except ValueError:
+                continue
+    t_cam = np.array(cam_times, dtype=np.float64)
+    n_cam = len(t_cam)
+    if n_cam < 2:
+        raise ValueError(
+            f"nav_cam_timestamps.csv must have at least 2 rows (found {n_cam})."
+        )
+
+    # --- Load sensor (mocap / odometry) data ---
+    mocap_csv = os.path.join(sensors_root, "mocap_vehicle_data.csv")
+    odom_csv = os.path.join(sensors_root, "rs_odom.csv")
+
+    if os.path.isfile(mocap_csv):
+        sensor_csv = mocap_csv
+        print(f"  GT velocity source: mocap  ({sensor_csv})")
+    elif os.path.isfile(odom_csv):
+        sensor_csv = odom_csv
+        print(f"  GT velocity source: rs_odom  ({sensor_csv})")
+    else:
+        raise FileNotFoundError(
+            f"No ground-truth sensor file found in sensors_root: {sensors_root}\n"
+            f"Expected 'mocap_vehicle_data.csv' or 'rs_odom.csv'."
+        )
+
+    # CSV header: t, p_x, p_y, p_z, q_w, q_x, q_y, q_z
+    s_t: list[float] = []
+    s_px: list[float] = []
+    s_py: list[float] = []
+    s_qw: list[float] = []
+    s_qx: list[float] = []
+    s_qy: list[float] = []
+    s_qz: list[float] = []
+
+    with open(sensor_csv, newline="") as fh:
+        reader = _csv.reader(fh)
+        header_row = next(reader)
+        col = [h.strip() for h in header_row]
+        idx_t = col.index("t")
+        idx_px = col.index("p_x")
+        idx_py = col.index("p_y")
+        idx_qw = col.index("q_w")
+        idx_qx = col.index("q_x")
+        idx_qy = col.index("q_y")
+        idx_qz = col.index("q_z")
+        for row in reader:
+            if not row:
+                continue
+            try:
+                s_t.append(float(row[idx_t]))
+                s_px.append(float(row[idx_px]))
+                s_py.append(float(row[idx_py]))
+                s_qw.append(float(row[idx_qw]))
+                s_qx.append(float(row[idx_qx]))
+                s_qy.append(float(row[idx_qy]))
+                s_qz.append(float(row[idx_qz]))
+            except (ValueError, IndexError):
+                continue
+
+    t_sensor = np.array(s_t, dtype=np.float64)
+    px = np.array(s_px, dtype=np.float64)
+    py = np.array(s_py, dtype=np.float64)
+    qw = np.array(s_qw, dtype=np.float64)
+    qx = np.array(s_qx, dtype=np.float64)
+    qy = np.array(s_qy, dtype=np.float64)
+    qz = np.array(s_qz, dtype=np.float64)
+
+    # --- Align sensor data to all camera frames using nearest-neighbor ---
+    aligned_px = np.empty(n_cam, dtype=np.float64)
+    aligned_py = np.empty(n_cam, dtype=np.float64)
+    aligned_yaw = np.empty(n_cam, dtype=np.float64)
+    aligned_t = np.empty(n_cam, dtype=np.float64)
+
+    for i in range(n_cam):
+        si = _nearest_index(t_sensor, t_cam[i])
+        aligned_px[i] = px[si]
+        aligned_py[i] = py[si]
+        aligned_yaw[i] = _quat_to_yaw(qx[si], qy[si], qz[si], qw[si])
+        aligned_t[i] = t_cam[i]
+
+    # --- Compute velocities as diff(position) / diff(time) ---
+    # Velocity at frame i is computed from frame i-1 to frame i
+    vx_all = np.full(n_cam, np.nan, dtype=np.float64)
+    vy_all = np.full(n_cam, np.nan, dtype=np.float64)
+    omega_all = np.full(n_cam, np.nan, dtype=np.float64)
+
+    for i in range(1, n_cam):
+        dt = aligned_t[i] - aligned_t[i - 1]
+        if dt > 1e-6:  # avoid division by very small dt
+            vx_all[i] = (aligned_px[i] - aligned_px[i - 1]) / dt
+            vy_all[i] = (aligned_py[i] - aligned_py[i - 1]) / dt
+            omega_all[i] = _wrap_angle(aligned_yaw[i] - aligned_yaw[i - 1]) / dt
+
+    # --- Extract velocities for the requested frame numbers ---
+    n_req = len(frame_numbers)
+    vx_gt = np.full(n_req, np.nan, dtype=np.float64)
+    vy_gt = np.full(n_req, np.nan, dtype=np.float64)
+    omega_gt = np.full(n_req, np.nan, dtype=np.float64)
+
+    for idx, fi in enumerate(frame_numbers):
+        if 0 <= fi < n_cam:
+            vx_gt[idx] = vx_all[fi]
+            vy_gt[idx] = vy_all[fi]
+            omega_gt[idx] = omega_all[fi]
+
+    return vx_gt, vy_gt, omega_gt

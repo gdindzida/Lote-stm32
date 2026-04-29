@@ -17,15 +17,8 @@ from hil.stm32 import find_stm32_port
 from hil.streamer import DatasetStreamer
 from hil.threads import reader_thread_fn, writer_thread_fn
 import numpy as np
-from hil.plot import plot_predictions, plot_timing, plot_velocity_xy
-from hil.kpi import (
-    load_ground_truth,
-    load_ground_truth_indoor,
-    compute_kpi,
-    print_kpi_report,
-    kalman_filter_velocity,
-    compute_velocity_gt,
-)
+from hil.plot import plot_timing, plot_velocity_xyz
+from hil.kpi import compute_velocity_gt_indoor
 
 if __name__ == "__main__":
 
@@ -103,23 +96,8 @@ if __name__ == "__main__":
         "--plot-kpi",
         action="store_true",
         default=False,
-        help="After the run, display a timeseries plot of vx, vy and omega"
+        help="After the run, display a timeseries plot of vx, vy and omega "
         "(predicted vs. ground truth).  Implies --kpi.",
-    )
-    parser.add_argument(
-        "--hfov",
-        type=float,
-        metavar="DEG",
-        default=101.0,
-        help="Camera horizontal field of view in degrees (default: 101).",
-    )
-    parser.add_argument(
-        "--vfov",
-        type=float,
-        metavar="DEG",
-        default=114,
-        help="Camera vertical field of view in degrees.  Defaults to --hfov (square "
-        "sensor).  Provide this when VFOV differs from HFOV.",
     )
     parser.add_argument(
         "--save-dir",
@@ -421,7 +399,20 @@ if __name__ == "__main__":
                             tipLength=0.3,
                         )
 
-            cv2.imshow("Left", big_annotated)
+            # Resize big image for display (max 800px width)
+            display_scale = min(1.0, 800.0 / big_annotated.shape[1])
+            if display_scale < 1.0:
+                big_display = cv2.resize(
+                    big_annotated,
+                    None,
+                    fx=display_scale,
+                    fy=display_scale,
+                    interpolation=cv2.INTER_AREA,
+                )
+            else:
+                big_display = big_annotated
+
+            cv2.imshow("Left", big_display)
             cv2.imshow("Small left", small_annotated)
 
             # Save the annotated big image to disk (if --save-dir was given).
@@ -449,93 +440,63 @@ if __name__ == "__main__":
     do_kpi = args.kpi or args.plot_kpi
     if do_kpi and frame_meta_list:
         print("")
-        print("Computing KPI…")
+        print("Computing velocity KPI…")
         try:
-            gt_px: "np.ndarray | None" = None
-            gt_py: "np.ndarray | None" = None
-
             # Derive sensors_root from data_root when not supplied.
             sensors_root: str = args.sensors_root or data_root.replace(
                 "_nav_cam", "_sensors"
             )
-            (
-                tx_gt,
-                ty_gt,
-                theta_gt,
-                gsd_x,
-                gsd_y,
-                gt_px,
-                gt_py,
-            ) = load_ground_truth_indoor(
+
+            # Extract predicted velocities from STM32
+            frame_numbers = [fm[0] for fm in frame_meta_list]
+            vx_pred = np.array([fm[1] for fm in frame_meta_list], dtype=np.float64)
+            vy_pred = np.array([fm[2] for fm in frame_meta_list], dtype=np.float64)
+            omega_pred = np.array([fm[3] for fm in frame_meta_list], dtype=np.float64)
+
+            # Compute ground truth velocities from position/orientation changes over time
+            vx_gt, vy_gt, omega_gt = compute_velocity_gt_indoor(
                 data_root,
                 sensors_root=sensors_root,
-                gsd_m_per_px=args.gsd,
-                hfov_deg=args.hfov,
-                vfov_deg=args.vfov,
+                frame_numbers=frame_numbers,
             )
 
-            frame_numbers = [fm[0] for fm in frame_meta_list]
-            tx_pred = [fm[1] for fm in frame_meta_list]
-            ty_pred = [fm[2] for fm in frame_meta_list]
-            theta_pred = [fm[3] for fm in frame_meta_list]
+            # Compute simple metrics (MAE, RMSE) for valid frames
+            valid_mask = ~np.isnan(vx_gt)
+            if valid_mask.any():
+                vx_mae = float(np.mean(np.abs(vx_pred[valid_mask] - vx_gt[valid_mask])))
+                vy_mae = float(np.mean(np.abs(vy_pred[valid_mask] - vy_gt[valid_mask])))
+                omega_mae = float(
+                    np.mean(np.abs(omega_pred[valid_mask] - omega_gt[valid_mask]))
+                )
 
-            kpi_result = compute_kpi(
-                frame_numbers,
-                tx_pred,
-                ty_pred,
-                theta_pred,
-                tx_gt,
-                ty_gt,
-                theta_gt,
-            )
-            print_kpi_report(kpi_result, gsd_x, gsd_y)
+                vx_rmse = float(
+                    np.sqrt(np.mean((vx_pred[valid_mask] - vx_gt[valid_mask]) ** 2))
+                )
+                vy_rmse = float(
+                    np.sqrt(np.mean((vy_pred[valid_mask] - vy_gt[valid_mask]) ** 2))
+                )
+                omega_rmse = float(
+                    np.sqrt(
+                        np.mean((omega_pred[valid_mask] - omega_gt[valid_mask]) ** 2)
+                    )
+                )
+
+                print(
+                    f"  Velocity MAE  — vx: {vx_mae:.4f} m/s,  vy: {vy_mae:.4f} m/s,  omega: {omega_mae:.4f} rad/s"
+                )
+                print(
+                    f"  Velocity RMSE — vx: {vx_rmse:.4f} m/s,  vy: {vy_rmse:.4f} m/s,  omega: {omega_rmse:.4f} rad/s"
+                )
 
             if args.plot_kpi:
-                plot_predictions(
+                plot_velocity_xyz(
                     frame_numbers,
-                    tx_pred,
-                    ty_pred,
-                    theta_pred,
-                    tx_gt,
-                    ty_gt,
-                    theta_gt,
-                )
-
-            # ------------------------------------------------------------------
-            # Kalman-filter velocity estimation vs. ground-truth velocity
-            # Available for both UAV and indoor datasets.
-            # ------------------------------------------------------------------
-            if args.plot_kpi and len(frame_numbers) > 1:
-                print("")
-                print("Running Kalman filter for velocity estimation…")
-
-                vx_kf, vy_kf = kalman_filter_velocity(
-                    frame_numbers, tx_pred, ty_pred, gsd_x, gsd_y
-                )
-
-                # Ground-truth velocity in m/frame, aligned with frame_numbers.
-                vx_gt_aligned, vy_gt_aligned = compute_velocity_gt(
-                    frame_numbers, tx_gt, ty_gt, gsd_x, gsd_y
-                )
-
-                # Report per-axis velocity MAE (valid GT frames only).
-                valid_mask = ~np.isnan(vx_gt_aligned)
-                if valid_mask.any():
-                    vx_mae = float(
-                        np.mean(np.abs(vx_kf[valid_mask] - vx_gt_aligned[valid_mask]))
-                    )
-                    vy_mae = float(
-                        np.mean(np.abs(vy_kf[valid_mask] - vy_gt_aligned[valid_mask]))
-                    )
-                    print(f"  KF velocity MAE — vx: {vx_mae:.4f} m/frame")
-                    print(f"  KF velocity MAE — vy: {vy_mae:.4f} m/frame")
-
-                plot_velocity_xy(
-                    frame_numbers,
-                    vx_kf,
-                    vy_kf,
-                    vx_gt_aligned,
-                    vy_gt_aligned,
+                    vx_pred,
+                    vy_pred,
+                    omega_pred,
+                    vx_gt,
+                    vy_gt,
+                    omega_gt,
                 )
         except Exception as exc:
             print(f"KPI computation failed: {exc}")
