@@ -30,6 +30,14 @@ Output CSV columns
     roll                roll  (rotation about X) in radians
     pitch               pitch (rotation about Y) in radians
     yaw                 yaw   (rotation about Z) in radians
+    imu_timestamp       matched px4_imu timestamp (s)
+    imu_delta_t         timestamp_cam - imu_timestamp (s), always >= 0
+    acc_x               linear acceleration x (m/s²)
+    acc_y               linear acceleration y (m/s²)
+    acc_z               linear acceleration z (m/s²)
+    gyro_x              angular velocity x (rad/s)
+    gyro_y              angular velocity y (rad/s)
+    gyro_z              angular velocity z (rad/s)
     image_path          relative path to rectified image (relative to data_root)
 
 Rows where no prior mocap reading exists are written with NaN sensor fields
@@ -142,6 +150,98 @@ def load_mocap(sensors_root: str):
     return {c: np.array(v, dtype=np.float64) for c, v in data.items()}
 
 
+def load_px4_imu(sensors_root: str):
+    """Load px4_imu.csv → dict of arrays.
+
+    Expected columns: t, a_x, a_y, a_z, w_x, w_y, w_z
+    Column names are detected from the header (strips whitespace and #).
+    """
+    imu_csv = os.path.join(sensors_root, "px4_imu.csv")
+    if not os.path.isfile(imu_csv):
+        raise FileNotFoundError(f"px4_imu.csv not found in: {sensors_root}")
+
+    # Map flexible column names → canonical names
+    ACC_CANDIDATES = [
+        ("a_x", "a_y", "a_z"),
+        ("acc_x", "acc_y", "acc_z"),
+        ("linear_acceleration_x", "linear_acceleration_y", "linear_acceleration_z"),
+    ]
+    GYRO_CANDIDATES = [
+        ("w_x", "w_y", "w_z"),
+        ("gyro_x", "gyro_y", "gyro_z"),
+        ("angular_velocity_x", "angular_velocity_y", "angular_velocity_z"),
+    ]
+
+    data = {
+        k: [] for k in ("t", "acc_x", "acc_y", "acc_z", "gyro_x", "gyro_y", "gyro_z")
+    }
+
+    with open(imu_csv, newline="") as fh:
+        reader = csv.reader(fh)
+        # Skip comment lines to find the header
+        raw_header = []
+        for row in reader:
+            if not row:
+                continue
+            first = row[0].strip().lstrip("#").strip()
+            if first.lower() in ("t", "timestamp", "time"):
+                raw_header = [c.strip().lstrip("#").strip() for c in row]
+                break
+            # If the first cell looks like a number it's data, not a header
+            try:
+                float(first)
+                break
+            except ValueError:
+                raw_header = [c.strip().lstrip("#").strip() for c in row]
+                break
+
+        if not raw_header:
+            raise ValueError("px4_imu.csv: could not detect header row.")
+
+        col = raw_header
+        idx_t = col.index("t") if "t" in col else None
+        if idx_t is None:
+            raise ValueError(f"px4_imu.csv: no 't' column found. Columns: {col}")
+
+        # Resolve accelerometer columns
+        acc_idx = None
+        for ax, ay, az in ACC_CANDIDATES:
+            if ax in col and ay in col and az in col:
+                acc_idx = (col.index(ax), col.index(ay), col.index(az))
+                break
+        if acc_idx is None:
+            raise ValueError(
+                f"px4_imu.csv: cannot find accelerometer columns. Columns: {col}"
+            )
+
+        # Resolve gyroscope columns
+        gyro_idx = None
+        for wx, wy, wz in GYRO_CANDIDATES:
+            if wx in col and wy in col and wz in col:
+                gyro_idx = (col.index(wx), col.index(wy), col.index(wz))
+                break
+        if gyro_idx is None:
+            raise ValueError(
+                f"px4_imu.csv: cannot find gyroscope columns. Columns: {col}"
+            )
+
+        for row in reader:
+            if not row:
+                continue
+            try:
+                data["t"].append(float(row[idx_t]))
+                data["acc_x"].append(float(row[acc_idx[0]]))
+                data["acc_y"].append(float(row[acc_idx[1]]))
+                data["acc_z"].append(float(row[acc_idx[2]]))
+                data["gyro_x"].append(float(row[gyro_idx[0]]))
+                data["gyro_y"].append(float(row[gyro_idx[1]]))
+                data["gyro_z"].append(float(row[gyro_idx[2]]))
+            except (ValueError, IndexError):
+                continue
+
+    return {k: np.array(v, dtype=np.float64) for k, v in data.items()}
+
+
 def find_rectified_images(data_root: str):
     """Scan rectified_img/ and return a dict: frame_index -> relative_path.
 
@@ -215,6 +315,12 @@ def build_dataset(data_root: str, sensors_root: str, output_csv: str) -> None:
     print(f"  {len(t_sensor)} mocap readings found")
     print(f"  Mocap time range: {t_sensor[0]:.6f} → {t_sensor[-1]:.6f} s")
 
+    print("Loading PX4 IMU data …")
+    imu = load_px4_imu(sensors_root)
+    t_imu = imu["t"]
+    print(f"  {len(t_imu)} IMU readings found")
+    print(f"  IMU time range:   {t_imu[0]:.6f} → {t_imu[-1]:.6f} s")
+
     print("Scanning rectified images …")
     frame_map = find_rectified_images(data_root)
     print(f"  {len(frame_map)} rectified images found")
@@ -238,6 +344,14 @@ def build_dataset(data_root: str, sensors_root: str, output_csv: str) -> None:
         "roll",
         "pitch",
         "yaw",
+        "imu_timestamp",
+        "imu_delta_t",
+        "acc_x",
+        "acc_y",
+        "acc_z",
+        "gyro_x",
+        "gyro_y",
+        "gyro_z",
         "image_path",
     ]
 
@@ -271,6 +385,21 @@ def build_dataset(data_root: str, sensors_root: str, output_csv: str) -> None:
                 mocap["q_z"][si],
             )
 
+            # Match IMU — last reading before camera frame
+            ii = _last_before(t_imu, t_cam)
+            if ii >= 0:
+                imu_timestamp = f"{t_imu[ii]:.9f}"
+                imu_delta_t = f"{t_cam - t_imu[ii]:.9f}"
+                acc_x = f"{imu['acc_x'][ii]:.9f}"
+                acc_y = f"{imu['acc_y'][ii]:.9f}"
+                acc_z = f"{imu['acc_z'][ii]:.9f}"
+                gyro_x = f"{imu['gyro_x'][ii]:.9f}"
+                gyro_y = f"{imu['gyro_y'][ii]:.9f}"
+                gyro_z = f"{imu['gyro_z'][ii]:.9f}"
+            else:
+                imu_timestamp = imu_delta_t = ""
+                acc_x = acc_y = acc_z = gyro_x = gyro_y = gyro_z = ""
+
             writer.writerow(
                 {
                     "timestamp_cam": f"{t_cam:.9f}",
@@ -286,6 +415,14 @@ def build_dataset(data_root: str, sensors_root: str, output_csv: str) -> None:
                     "roll": f"{roll:.9f}",
                     "pitch": f"{pitch:.9f}",
                     "yaw": f"{yaw:.9f}",
+                    "imu_timestamp": imu_timestamp,
+                    "imu_delta_t": imu_delta_t,
+                    "acc_x": acc_x,
+                    "acc_y": acc_y,
+                    "acc_z": acc_z,
+                    "gyro_x": gyro_x,
+                    "gyro_y": gyro_y,
+                    "gyro_z": gyro_z,
                     "image_path": image_path,
                 }
             )

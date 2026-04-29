@@ -20,7 +20,7 @@ extern "C" {
 #define SEARCH_SIZE (4)
 #define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
 #define K_FACTOR (2)
-#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 5)
+#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 20)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
 
 // NOLINTNEXTLINE
@@ -38,20 +38,17 @@ typedef struct __attribute__((packed)) {
 } Coordinate;
 
 // PacketHeader received FROM host (sent with each frame)
-// Contains: magic, length, pose/timing metadata, and camera calibration
-// Total size: 56 bytes (2 + 2 + 28 + 24)
-// NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint16_t magic;  // Magic number (0xABCD)
   uint16_t length; // Payload length
   // Input metadata: pose and timing (28 bytes)
-  float dt;    // Time since previous frame (seconds)
-  float p_x;   // Position x (meters)
-  float p_y;   // Position y (meters)
-  float p_z;   // Position z (meters)
-  float roll;  // Roll angle (radians)
-  float pitch; // Pitch angle (radians)
-  float yaw;   // Yaw angle (radians)
+  float dt;  // Time since previous frame (seconds)
+  float a_x; // Position x (meters)
+  float a_y; // Position y (meters)
+  float a_z; // Position z (meters)
+  float w_x; // Roll angle (radians)
+  float w_y; // Pitch angle (radians)
+  float w_z; // Yaw angle (radians)
   // Camera calibration parameters (24 bytes)
   float fx; // Focal length x (pixels)
   float fy; // Focal length y (pixels)
