@@ -29,6 +29,8 @@ struct LSE_solution {
   float tx;
   float ty;
   float theta;
+  float u;
+  float v;
 };
 
 void process_data(Payload *payload, WorkPackageType work_package_type);

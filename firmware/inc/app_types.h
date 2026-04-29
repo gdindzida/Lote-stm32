@@ -43,9 +43,10 @@ typedef struct __attribute__((packed)) {
   uint16_t length; // Payload length
   // Input metadata: pose and timing (28 bytes)
   float dt;  // Time since previous frame (seconds)
-  float a_x; // Position x (meters)
-  float a_y; // Position y (meters)
-  float a_z; // Position z (meters)
+  float h;   // Height
+  float a_x; //
+  float a_y; //
+  float a_z; //
   float w_x; // Roll angle (radians)
   float w_y; // Pitch angle (radians)
   float w_z; // Yaw angle (radians)
@@ -56,7 +57,12 @@ typedef struct __attribute__((packed)) {
   float cy; // Principal point y (pixels)
   float k1; // Radial distortion coefficient 1
   float k2; // Radial distortion coefficient 2
-} PacketHeader;
+} RecvPacketHeader;
+
+typedef struct __attribute__((packed)) {
+  uint16_t magic;  // Magic number (0xABCD)
+  uint16_t length; // Payload length
+} SendPacketHeader;
 
 // Output metadata sent TO host (processing results)
 // NOLINTNEXTLINE
@@ -67,14 +73,14 @@ typedef struct __attribute__((packed)) {
   uint16_t num_points;
   float stack_mem_usage;
   float heap_mem_usage;
-  float tx;
-  float ty;
-  float theta;
+  float vx;
+  float vy;
+  float omega;
 } Metadata;
 
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
-  PacketHeader header;
+  SendPacketHeader header;
   Metadata metadata;
   Coordinate coordinates[121];
 } Payload;

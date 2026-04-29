@@ -107,7 +107,8 @@ LSE_solution solve_lse(LSE_data &lse_data) {
       static_cast<float>((lse_data.N * (lse_data.ryu_sum - lse_data.rxv_sum)) -
                          (lse_data.ry_sum * lse_data.u_sum) +
                          (lse_data.rx_sum * lse_data.v_sum)) /
-      static_cast<float>(lse_data.rx2_sum + lse_data.ry2_sum -
+      static_cast<float>((lse_data.rx_sum * lse_data.rx_sum) +
+                         (lse_data.ry2_sum * lse_data.ry2_sum) -
                          (lse_data.N * (lse_data.rx2_sum + lse_data.ry2_sum)));
 
   sol.tx = (static_cast<float>(lse_data.u_sum) +
@@ -117,6 +118,11 @@ LSE_solution solve_lse(LSE_data &lse_data) {
   sol.ty = (static_cast<float>(lse_data.v_sum) -
             (static_cast<float>(lse_data.rx_sum) * sol.theta)) /
            static_cast<float>(lse_data.N);
+
+  sol.u = sol.tx - (static_cast<float>(lse_data.ry_sum) * sol.theta /
+                    static_cast<float>(lse_data.N));
+  sol.v = sol.ty + (static_cast<float>(lse_data.rx_sum) * sol.theta /
+                    static_cast<float>(lse_data.N));
 
   return sol;
 }
@@ -171,13 +177,17 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.sum_u = lse_data.u_sum;
   payload->metadata.sum_v = lse_data.v_sum;
   payload->metadata.num_points = lse_data.N;
-  payload->metadata.tx =
-      solution.tx - (static_cast<float>(lse_data.ry_sum) * solution.theta /
-                     static_cast<float>(lse_data.N));
-  payload->metadata.ty =
-      solution.ty + (static_cast<float>(lse_data.rx_sum) * solution.theta /
-                     static_cast<float>(lse_data.N));
-  payload->metadata.theta = solution.theta;
+  payload->metadata.vx =
+      MAX(MIN(solution.u * current_packet_header.h /
+                  (current_packet_header.fx * current_packet_header.dt),
+              1),
+          -1);
+  payload->metadata.vy =
+      MAX(MIN(solution.v * current_packet_header.h /
+                  (current_packet_header.fy * current_packet_header.dt),
+              1),
+          -1);
+  payload->metadata.omega = solution.theta / current_packet_header.dt;
 
   payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
 

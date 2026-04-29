@@ -7,7 +7,8 @@ import serial
 from hil.csv_dataset import CsvDatasetStreamer
 from hil.frames import FrameItem, FrameReadEvent, FrameWriteEvent
 from hil.protocol import (
-    HEADER_FMT,
+    SEND_HEADER_FMT,
+    RECV_HEADER_FMT,
     MAGIC,
     METADATA_FMT,
     COORD_FMT,
@@ -75,11 +76,31 @@ def writer_thread_fn(
 
     entry: Dict[str, Any] = streamer.entries[0]  # type: ignore
 
-    packet_header = struct.pack(
-        HEADER_FMT,
+    print(
+        "debug: Packet header contains: ",
         MAGIC,
         APP_RX_BUFFER_SIZE,
         0.0,  # dt = 0 for first frame
+        float(entry.get("p_z", 0.0)),
+        float(entry.get("acc_x", 0.0)),
+        float(entry.get("acc_y", 0.0)),
+        float(entry.get("acc_z", 0.0)),
+        float(entry.get("gyro_x", 0.0)),
+        float(entry.get("gyro_y", 0.0)),
+        float(entry.get("gyro_z", 0.0)),
+        calibration["fx"],
+        calibration["fy"],
+        calibration["cx"],
+        calibration["cy"],
+        calibration["k1"],
+        calibration["k2"],
+    )
+    packet_header = struct.pack(
+        SEND_HEADER_FMT,
+        MAGIC,
+        APP_RX_BUFFER_SIZE,
+        0.0,  # dt = 0 for first frame
+        float(entry.get("p_z", 0.0)),
         float(entry.get("acc_x", 0.0)),
         float(entry.get("acc_y", 0.0)),
         float(entry.get("acc_z", 0.0)),
@@ -126,11 +147,31 @@ def writer_thread_fn(
         dt = curr_ts - prev_ts
 
         # Build PacketHeader with current frame metadata and calibration
+        print(
+            "debug: Packet header contains: ",
+            MAGIC,
+            APP_RX_BUFFER_SIZE,
+            dt,  # dt = 0 for first frame
+            float(entry.get("p_z", 0.0)),
+            float(entry.get("acc_x", 0.0)),
+            float(entry.get("acc_y", 0.0)),
+            float(entry.get("acc_z", 0.0)),
+            float(entry.get("gyro_x", 0.0)),
+            float(entry.get("gyro_y", 0.0)),
+            float(entry.get("gyro_z", 0.0)),
+            calibration["fx"],
+            calibration["fy"],
+            calibration["cx"],
+            calibration["cy"],
+            calibration["k1"],
+            calibration["k2"],
+        )
         packet_header = struct.pack(
-            HEADER_FMT,
+            SEND_HEADER_FMT,
             MAGIC,
             APP_RX_BUFFER_SIZE,
             dt,
+            float(entry.get("p_z", 0.0)),
             float(entry.get("acc_x", 0.0)),
             float(entry.get("acc_y", 0.0)),
             float(entry.get("acc_z", 0.0)),
@@ -232,8 +273,8 @@ def reader_thread_fn(
         image = item.image
 
         # Read header
-        header_bytes = ser.read(struct.calcsize(HEADER_FMT))
-        if len(header_bytes) < struct.calcsize(HEADER_FMT):
+        header_bytes = ser.read(struct.calcsize(RECV_HEADER_FMT))
+        if len(header_bytes) < struct.calcsize(RECV_HEADER_FMT):
             print("Reader: timeout waiting for header")
             print("")
             continue
@@ -241,7 +282,7 @@ def reader_thread_fn(
             # break
 
         # Unpack header: magic, length, and all the metadata/calibration fields
-        header_data = struct.unpack(HEADER_FMT, header_bytes)
+        header_data = struct.unpack(RECV_HEADER_FMT, header_bytes)
         magic = header_data[0]
         length = header_data[1]
         # header_data[2:] contains dt, p_x, p_y, p_z, roll, pitch, yaw, fx, fy, cx, cy, k1, k2

@@ -129,6 +129,7 @@ def compute_and_print_kpi(
     data_root: str,
     sensors_root: str,
     plot_kpi: bool = False,
+    start_frame: int = 0,
 ) -> None:
     """Compute and print velocity KPI metrics comparing STM32 output to ground truth.
 
@@ -158,6 +159,7 @@ def compute_and_print_kpi(
             data_root,
             sensors_root=sensors_root,
             frame_numbers=frame_numbers,
+            start_frame=start_frame,
         )
 
         # Compute simple metrics (MAE, RMSE) for valid frames
@@ -197,6 +199,7 @@ def compute_velocity_gt_indoor(
     data_root: str,
     sensors_root: str,
     frame_numbers: Sequence[int],
+    start_frame: int = 0,
 ) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray"]:
     """Compute ground-truth velocities (vx, vy, omega) for indoor dataset frames.
 
@@ -345,8 +348,8 @@ def compute_velocity_gt_indoor(
 
     for idx, fi in enumerate(frame_numbers):
         if 0 <= fi < n_cam:
-            vx_gt[idx] = vx_all[fi]
-            vy_gt[idx] = vy_all[fi]
+            vx_gt[idx] = vx_all[fi + start_frame]
+            vy_gt[idx] = vy_all[fi + start_frame]
             omega_gt[idx] = omega_all[fi]
 
     return vx_gt, vy_gt, omega_gt

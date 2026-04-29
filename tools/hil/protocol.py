@@ -3,7 +3,8 @@ from dataclasses import dataclass
 # STM32 binary protocol constants
 MAGIC = 0xABCD
 PACKET_SIZE = 64
-HEADER_FMT = "<HHfffffffffffff"
+SEND_HEADER_FMT = "<HHffffffffffffff"
+RECV_HEADER_FMT = "<HH"
 APP_RX_BUFFER_SIZE = 9216
 METADATA_FMT = "<IhhHfffff"
 COORD_FMT = "<hhB"

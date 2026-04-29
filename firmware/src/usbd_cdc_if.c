@@ -15,8 +15,8 @@ volatile uint32_t rxBufferOffset = 0;
 // Packet header from host - parsed from received frames
 // Contains pose, timing, and camera calibration data
 // These are updated each time a frame is received
-volatile PacketHeader current_packet_header = {0};
-volatile PacketHeader previous_packet_header = {0};
+volatile RecvPacketHeader current_packet_header = {0};
+volatile RecvPacketHeader previous_packet_header = {0};
 
 typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
 static volatile RxStateType rxState = RX_WAIT_FOR_MAGIC;
@@ -140,19 +140,16 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
   switch (rxState) {
 
   case RX_WAIT_FOR_MAGIC: {
-    PacketHeader *hdr = (PacketHeader *)(UserRxBufferFS + rxBufferOffset);
+    RecvPacketHeader *hdr =
+        (RecvPacketHeader *)(UserRxBufferFS + rxBufferOffset);
     if (hdr->magic == MAGIC) {
       rxBytesReceived = 0;
       rxState = RX_RECEIVING_DATA;
     }
 
-    // Parse packet header from the received buffer
-    // The buffer contains: PacketHeader (56 bytes) + Image data (9216 bytes)
-    PacketHeader *pkt_hdr = (PacketHeader *)UserRxBufferFS;
-
-    // Save previous header before updating current
     previous_packet_header = current_packet_header;
-    current_packet_header = *pkt_hdr;
+    current_packet_header = *hdr;
+
     /* Always reset RX pointer to start of slot so magic bytes are
      * overwritten by the first image data packet. */
     USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);

@@ -275,9 +275,8 @@ if __name__ == "__main__":
                 data_root=data_root,
                 sensors_root=sensors_root,
                 plot_kpi=args.plot_kpi,
+                start_frame=args.start_frame,
             )
-    elif do_kpi:
-        print("KPI requested but no frames were successfully received — skipping.")
 
     if args.playback is not None or args.playback_realtime:
         playback_recorded_frames(
