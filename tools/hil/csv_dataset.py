@@ -24,10 +24,8 @@ from typing import Any, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from hil.streamer import DatasetStreamer, DatasetStreamerAdapter
 
-
-class CsvDatasetStreamer(DatasetStreamer):
+class CsvDatasetStreamer:
     """Stream grayscale frames from a dataset.csv file.
 
     Parameters
@@ -49,7 +47,7 @@ class CsvDatasetStreamer(DatasetStreamer):
         self,
         dataset_csv_path: str,
         data_root: str | None = None,
-        dataset_streamer_adapter: DatasetStreamerAdapter | None = None,
+        dataset_streamer_adapter: Any | None = None,
         start_frame: int = 1,
     ) -> None:
         self.dataset_csv_path = dataset_csv_path
@@ -64,7 +62,7 @@ class CsvDatasetStreamer(DatasetStreamer):
             raise FileNotFoundError(f"Dataset CSV not found: {self.dataset_csv_path}")
 
         # Load dataset entries
-        self.entries: List[dict] = self._load_dataset()
+        self.entries: List[dict] = self.load_dataset()
 
         if not self.entries:
             raise ValueError(
@@ -89,15 +87,13 @@ class CsvDatasetStreamer(DatasetStreamer):
 
         self.index: int = start_index
         self.total: int = n_entries
-        self.dataset_streamer_adapter: DatasetStreamerAdapter | None = (
-            dataset_streamer_adapter
-        )
+        self.dataset_streamer_adapter: Any | None = dataset_streamer_adapter
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Public methods
     # ------------------------------------------------------------------
 
-    def _load_dataset(self) -> List[dict]:
+    def load_dataset(self) -> List[dict]:
         """Parse dataset.csv and return a list of entry dicts.
 
         Each dict contains all columns from the CSV, with keys matching
@@ -160,10 +156,6 @@ class CsvDatasetStreamer(DatasetStreamer):
             return float(self.entries[index]["timestamp_cam"])
         return 0.0
 
-    # ------------------------------------------------------------------
-    # DatasetStreamer interface
-    # ------------------------------------------------------------------
-
     def reset(self) -> None:
         self.index = 0
 
@@ -172,8 +164,8 @@ class CsvDatasetStreamer(DatasetStreamer):
 
     def next(
         self,
-    ) -> Optional["np.ndarray[Any, Any] | None"]:
-        """Return ``(query_img, reference_img)`` for the current frame.
+    ) -> Optional[np.ndarray[Any, Any]]:
+        """Return the grayscale image for the current frame.
 
         Both elements are the **same** grayscale image because we have a
         single image stream. The HIL writer thread only uses the left/query

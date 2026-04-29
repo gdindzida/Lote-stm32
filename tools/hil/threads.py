@@ -4,10 +4,10 @@ import threading
 import time
 from typing import List, Optional
 
-from cv2 import resize
 import serial
 
-from hil.frames import FrameItem, FrameRecord, scale_image
+from hil.csv_dataset import CsvDatasetStreamer
+from hil.frames import FrameItem, FrameRecord
 from hil.protocol import (
     HEADER_FMT,
     MAGIC,
@@ -19,12 +19,11 @@ from hil.protocol import (
     Metadata,
     Coordinate,
 )
-from hil.streamer import DatasetStreamer
 
 
 def writer_thread_fn(
     ser: serial.Serial,
-    streamer: DatasetStreamer,
+    streamer: CsvDatasetStreamer,
     frame_queue: "queue.Queue[Optional[FrameItem]]",
     write_freq_hz: Optional[float],
     do_record: bool,
@@ -67,14 +66,7 @@ def writer_thread_fn(
     period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
 
     # --- First frame (sent before the main loop) ---
-    result = streamer.next()
-    if result is None:
-        print("Images are None!")
-        error_event.set()
-        frame_queue.put(None)
-        return
-
-    left_img = result
+    left_img = streamer.next()
 
     if left_img is None:
         print("Left image is None!")
@@ -112,12 +104,7 @@ def writer_thread_fn(
 
     # --- Subsequent frames ---
     while streamer.has_next() and not stop_event.is_set():
-        result = streamer.next()
-        if result is None:
-            print("Images are None!")
-            continue
-
-        left_img = result
+        left_img = streamer.next()
 
         if left_img is None:
             print("Left image is None!")
