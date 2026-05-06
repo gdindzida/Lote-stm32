@@ -20,9 +20,9 @@ extern "C" {
 #define SEARCH_SIZE (4)
 #define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
 #define K_FACTOR (2)
-#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 5)
+#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 10)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
-#define VAR_MIN (50)
+#define VAR_MIN (30)
 
 // NOLINTNEXTLINE
 typedef enum {

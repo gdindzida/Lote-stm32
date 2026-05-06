@@ -55,6 +55,7 @@ def process(input_dir, output_dir, K, D, crop_size=256, out_size=96):
 
     h, w = sample.shape[:2]
 
+    # TODO write new K to new camchain file
     newK, _ = cv2.getOptimalNewCameraMatrix(K, D, (w, h), 1, (w, h))
 
     map1, map2 = cv2.initUndistortRectifyMap(K, D, None, newK, (w, h), cv2.CV_16SC2)

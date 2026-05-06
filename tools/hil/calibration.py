@@ -53,8 +53,8 @@ def load_camchain(yaml_path: str) -> Dict[str, float]:
         )
 
     calibration = {
-        "fx": float(intrinsics[0]),
-        "fy": float(intrinsics[1]),
+        "fx": float(intrinsics[0]) * 96 / 2056,
+        "fy": float(intrinsics[1]) * 96 / 1542,
         "cx": float(intrinsics[2]),
         "cy": float(intrinsics[3]),
         "k1": float(distortion[0]),

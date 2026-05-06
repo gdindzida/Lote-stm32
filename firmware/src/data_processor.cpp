@@ -47,14 +47,32 @@ void process_stride(const uint8_t *curr_img_stride,
         static_cast<int16_t>(SEARCH_SIZE),
         static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * i)), false};
 
+    int psum = 0;
+    int psum2 = 0;
+    for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
+      for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
+        int current_val = static_cast<int>(prev_img_stride[coord_to_index(
+            current_start.row + row, current_start.col + col, IMG_W)]);
+        psum += current_val;
+        psum2 += current_val * current_val;
+      }
+    }
+    // TODO move out of the double for loop!
+    float mean = static_cast<float>(psum) / 64;
+    float variance = (static_cast<float>(psum2) / 64) - (mean * mean);
+
+    payload->coordinates[index] = {u, v, false};
+
+    if (variance < VAR_MIN) {
+      index++;
+      continue;
+    }
+
     for (const Coordinate &search_index : search_indices) {
       int sad = 0;
       Coordinate candidate_start = {
           static_cast<int16_t>(current_start.row + search_index.row),
           static_cast<int16_t>(current_start.col + search_index.col), false};
-
-      int psum = 0;
-      int psum2 = 0;
 
       for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
         for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
@@ -69,18 +87,7 @@ void process_stride(const uint8_t *curr_img_stride,
           }
 
           sad += diff;
-
-          psum += current_val;
-          psum2 += current_val * current_val;
         }
-      }
-
-      // TODO move out of the double for loop!
-      float mean = psum / 64;
-      float variance = (psum2 / 64) - (mean * mean);
-
-      if (variance < VAR_MIN) {
-        break;
       }
 
       if (sad < min_sad) {
@@ -94,6 +101,7 @@ void process_stride(const uint8_t *curr_img_stride,
     index++;
 
     if (min_sad < SAD_CEILING) {
+      float weight = 1.0f / (1.0f + min_sad);
       payload->coordinates[index - 1].valid = true;
       uint8_t gx =
           SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + (SAD_BLOCK_SIZE * i);
@@ -103,40 +111,40 @@ void process_stride(const uint8_t *curr_img_stride,
       int32_t ry = CENTER_ROW - static_cast<int32_t>(gy);
 
       lse_data.N++;
-      lse_data.u_sum += u;
-      lse_data.v_sum += v;
-      lse_data.rx_sum += rx;
-      lse_data.ry_sum += ry;
-      lse_data.rx2_sum += rx * rx;
-      lse_data.ry2_sum += ry * ry;
-      lse_data.rxv_sum += rx * v;
-      lse_data.ryu_sum += ry * u;
+      lse_data.u_sum += weight * u;
+      lse_data.v_sum += weight * v;
+      lse_data.rx_sum += weight * rx;
+      lse_data.ry_sum += weight * ry;
+      lse_data.rx2_sum += weight * rx * rx;
+      lse_data.ry2_sum += weight * ry * ry;
+      lse_data.rxv_sum += weight * rx * v;
+      lse_data.ryu_sum += weight * ry * u;
     }
   }
 }
 
 LSE_solution solve_lse(LSE_data &lse_data) {
   LSE_solution sol{};
-  sol.theta =
-      static_cast<float>((lse_data.N * (lse_data.ryu_sum - lse_data.rxv_sum)) -
-                         (lse_data.ry_sum * lse_data.u_sum) +
-                         (lse_data.rx_sum * lse_data.v_sum)) /
-      static_cast<float>((lse_data.rx_sum * lse_data.rx_sum) +
-                         (lse_data.ry_sum * lse_data.ry_sum) -
-                         (lse_data.N * (lse_data.rx2_sum + lse_data.ry2_sum)));
 
-  sol.tx = (static_cast<float>(lse_data.u_sum) +
-            (static_cast<float>(lse_data.ry_sum) * sol.theta)) /
-           static_cast<float>(lse_data.N);
+  if (lse_data.N > 0) {
+    sol.theta = ((lse_data.N * (lse_data.ryu_sum - lse_data.rxv_sum)) -
+                 (lse_data.ry_sum * lse_data.u_sum) +
+                 (lse_data.rx_sum * lse_data.v_sum)) /
+                ((lse_data.rx_sum * lse_data.rx_sum) +
+                 (lse_data.ry_sum * lse_data.ry_sum) -
+                 (lse_data.N * (lse_data.rx2_sum + lse_data.ry2_sum)));
 
-  sol.ty = (static_cast<float>(lse_data.v_sum) -
-            (static_cast<float>(lse_data.rx_sum) * sol.theta)) /
-           static_cast<float>(lse_data.N);
+    sol.tx = ((lse_data.u_sum) + ((lse_data.ry_sum) * sol.theta)) /
+             static_cast<float>(lse_data.N);
 
-  sol.u = sol.tx - (static_cast<float>(lse_data.ry_sum) * sol.theta /
-                    static_cast<float>(lse_data.N));
-  sol.v = sol.ty + (static_cast<float>(lse_data.rx_sum) * sol.theta /
-                    static_cast<float>(lse_data.N));
+    sol.ty = ((lse_data.v_sum) - ((lse_data.rx_sum) * sol.theta)) /
+             static_cast<float>(lse_data.N);
+
+    sol.u = sol.tx -
+            ((lse_data.ry_sum) * sol.theta / static_cast<float>(lse_data.N));
+    sol.v = sol.ty +
+            ((lse_data.rx_sum) * sol.theta / static_cast<float>(lse_data.N));
+  }
 
   return sol;
 }
