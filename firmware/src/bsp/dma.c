@@ -1,25 +1,25 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    dma.c
-  * @brief   This file provides code for the configuration
-  *          of all the requested memory to memory DMA transfers.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    dma.c
+ * @brief   This file provides code for the configuration
+ *          of all the requested memory to memory DMA transfers.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
-#include "dma.h"
+#include "bsp/dma.h"
 
 /* USER CODE BEGIN 0 */
 
@@ -35,12 +35,11 @@
 DMA_HandleTypeDef hdma_memtomem_dma1_channel1;
 
 /**
-  * Enable DMA controller clock
-  * Configure DMA for memory to memory transfers
-  *   hdma_memtomem_dma1_channel1
-  */
-void MX_DMA_Init(void)
-{
+ * Enable DMA controller clock
+ * Configure DMA for memory to memory transfers
+ *   hdma_memtomem_dma1_channel1
+ */
+void MX_DMA_Init(void) {
 
   /* DMA controller clock enable */
   __HAL_RCC_DMAMUX1_CLK_ENABLE();
@@ -56,14 +55,11 @@ void MX_DMA_Init(void)
   hdma_memtomem_dma1_channel1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
   hdma_memtomem_dma1_channel1.Init.Mode = DMA_NORMAL;
   hdma_memtomem_dma1_channel1.Init.Priority = DMA_PRIORITY_HIGH;
-  if (HAL_DMA_Init(&hdma_memtomem_dma1_channel1) != HAL_OK)
-  {
+  if (HAL_DMA_Init(&hdma_memtomem_dma1_channel1) != HAL_OK) {
     Error_Handler();
   }
-
 }
 
 /* USER CODE BEGIN 2 */
 
 /* USER CODE END 2 */
-

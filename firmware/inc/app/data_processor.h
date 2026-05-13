@@ -1,7 +1,7 @@
 #ifndef __DATA_PROCESSOR_H__
 #define __DATA_PROCESSOR_H__
 
-#include "app_types.h"
+#include "app/app_types.h"
 
 #ifdef __cplusplus
 extern "C" {

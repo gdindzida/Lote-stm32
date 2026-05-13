@@ -1,13 +1,13 @@
-#include "main.h"
-#include "app_types.h"
-#include "data_processor.h"
-#include "dma.h"
-#include "dwt.h"
-#include "gpio.h"
+#include "system/main.h"
+#include "app/app_types.h"
+#include "app/data_processor.h"
+#include "bsp/dma.h"
+#include "bsp/dwt.h"
+#include "bsp/gpio.h"
 #include "stm32g4xx_hal.h"
-#include "sysmem.h"
-#include "usb_device.h"
-#include "usbd_cdc_if.h"
+#include "system/sysmem.h"
+#include "usb/usb_device.h"
+#include "usb/usbd_cdc_if.h"
 #include <string.h>
 
 void SystemClock_Config(void);

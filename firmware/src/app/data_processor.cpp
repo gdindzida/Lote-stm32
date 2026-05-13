@@ -1,11 +1,11 @@
-#include "data_processor.h"
-#include "app_types.h"
-#include "dwt.h"
-#include "image.h"
+#include "app/data_processor.h"
+#include "app/app_types.h"
+#include "app/image.h"
+#include "bsp/dwt.h"
 #include "stm32g4xx_hal.h"
 #include "stm32g4xx_hal_def.h"
-#include "sysmem.h"
-#include "usbd_cdc_if.h"
+#include "system/sysmem.h"
+#include "usb/usbd_cdc_if.h"
 #include "usbd_def.h"
 #include <array>
 #include <cstdint>
@@ -57,7 +57,6 @@ void process_stride(const uint8_t *curr_img_stride,
         psum2 += current_val * current_val;
       }
     }
-    // TODO move out of the double for loop!
     float mean = static_cast<float>(psum) / 64;
     float variance = (static_cast<float>(psum2) / 64) - (mean * mean);
 
