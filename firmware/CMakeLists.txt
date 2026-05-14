@@ -88,6 +88,9 @@ set(APP_SOURCES
     src/system/system_stm32g4xx.c
     src/system/syscall.c
     src/system/sysmem.c
+    src/system/system_clock.c
+    src/system/error_handler.c
+    src/system/assert_handler.c
 )
 
 # HAL driver sources
