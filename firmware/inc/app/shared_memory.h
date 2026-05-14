@@ -6,9 +6,9 @@
 
 extern volatile WorkPackageType currentWorkType;
 // NOLINTNEXTLINE
-extern volatile uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 // NOLINTNEXTLINE
-extern volatile uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 extern volatile uint32_t rxBufferOffset;
 
 extern volatile RecvPacketHeader current_packet_header;

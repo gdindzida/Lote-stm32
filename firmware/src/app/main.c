@@ -4,6 +4,7 @@
 #include "bsp/dma.h"
 #include "bsp/dwt.h"
 #include "bsp/gpio.h"
+#include "cmsis_gcc.h"
 #include "stm32g4xx_hal.h"
 #include "system/sysmem.h"
 #include "usb/usb_device.h"
@@ -15,8 +16,8 @@ void SystemClock_Config(void);
 
 // Static memory
 volatile WorkPackageType currentWorkType = NO_WORK;
-volatile uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-volatile uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 volatile uint32_t rxBufferOffset = 0;
 
 volatile RecvPacketHeader current_packet_header = {0};
@@ -106,9 +107,9 @@ void SystemClock_Config(void) {
  * @retval None
  */
 void Error_Handler(void) {
-  __disable_irq();
   while (1) {
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
+
     HAL_Delay(500);
   }
 }
