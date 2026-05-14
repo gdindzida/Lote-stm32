@@ -1,6 +1,7 @@
 #include "app/data_processor.h"
 #include "app/app_types.h"
 #include "app/image.h"
+#include "app/shared_memory.h"
 #include "bsp/dwt.h"
 #include "stm32g4xx_hal.h"
 #include "stm32g4xx_hal_def.h"
@@ -33,8 +34,8 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
   return (row * width) + col;
 }
 
-void process_stride(const uint8_t *curr_img_stride,
-                    const uint8_t *prev_img_stride, LSE_data &lse_data,
+void process_stride(volatile const uint8_t *curr_img_stride,
+                    volatile const uint8_t *prev_img_stride, LSE_data &lse_data,
                     uint8_t stride_row_offset, Payload *payload,
                     int32_t &index) {
 
@@ -158,12 +159,12 @@ extern "C" void process_data(Payload *payload,
   payload->header.length = 0;
 
   // Get pointer to the current buffer slot
-  uint8_t *currbufferView = UserRxBufferFS;
+  volatile uint8_t *currbufferView = UserRxBufferFS;
   if (work_package_type == PROCESS_RX_2) {
     currbufferView += APP_RX_BUFFER_SIZE;
   }
 
-  uint8_t *prevbufferView = currbufferView + APP_RX_BUFFER_SIZE;
+  volatile uint8_t *prevbufferView = currbufferView + APP_RX_BUFFER_SIZE;
   if (work_package_type == PROCESS_RX_2) {
     prevbufferView = UserRxBufferFS;
   }

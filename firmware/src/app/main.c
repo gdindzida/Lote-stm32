@@ -13,7 +13,15 @@
 
 void SystemClock_Config(void);
 
+// Static memory
 volatile WorkPackageType currentWorkType = NO_WORK;
+volatile uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+volatile uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+volatile uint32_t rxBufferOffset = 0;
+
+volatile RecvPacketHeader current_packet_header = {0};
+volatile RecvPacketHeader previous_packet_header = {0};
+
 static Payload payload = {};
 
 /**
@@ -33,7 +41,7 @@ int main(void) {
 
   while (1) {
     __disable_irq();
-    WorkPackageType work_package_type = currentWorkType;
+    volatile WorkPackageType work_package_type = currentWorkType;
     __enable_irq();
 
     if (work_package_type != NO_WORK) {
@@ -44,7 +52,7 @@ int main(void) {
         memcpy(UserTxBufferFS, &payload, length);
         CDC_Transmit_FS(UserTxBufferFS, length);
       } else {
-        isFirst = true;
+        isFirst = false;
       }
     }
   }

@@ -7,15 +7,12 @@
 // new
 extern USBD_HandleTypeDef hUsbDeviceFS;
 extern volatile WorkPackageType currentWorkType;
-uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
-volatile uint32_t rxBufferOffset = 0;
+extern volatile uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+extern volatile uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+extern volatile uint32_t rxBufferOffset;
 
-// Packet header from host - parsed from received frames
-// Contains pose, timing, and camera calibration data
-// These are updated each time a frame is received
-volatile RecvPacketHeader current_packet_header = {0};
-volatile RecvPacketHeader previous_packet_header = {0};
+extern volatile RecvPacketHeader current_packet_header;
+extern volatile RecvPacketHeader previous_packet_header;
 
 typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
 static volatile RxStateType rxState = RX_WAIT_FOR_MAGIC;
