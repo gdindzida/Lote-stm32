@@ -6,8 +6,7 @@
 
 // new
 extern USBD_HandleTypeDef hUsbDeviceFS;
-extern volatile WorkPackageType work_queue[WORK_QUEUE_SIZE];
-extern volatile uint8_t current_queue_in_index;
+extern volatile WorkPackageType currentWorkType;
 uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 volatile uint32_t rxBufferOffset = 0;
@@ -164,12 +163,10 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
       rxState = RX_WAIT_FOR_MAGIC;
 
       if (rxBufferOffset == 0) {
-        work_queue[current_queue_in_index] = PROCESS_RX_1;
+        currentWorkType = PROCESS_RX_1;
       } else {
-        work_queue[current_queue_in_index] = PROCESS_RX_2;
+        currentWorkType = PROCESS_RX_2;
       }
-      current_queue_in_index++;
-      current_queue_in_index %= WORK_QUEUE_SIZE;
 
       rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
       USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);

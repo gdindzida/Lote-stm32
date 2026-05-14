@@ -172,26 +172,36 @@ extern "C" void process_data(Payload *payload,
 
   int32_t index = 0;
   process_stride(currbufferView, prevbufferView, lse_data, 0, payload, index);
-  process_stride(currbufferView + IMG_W, prevbufferView + IMG_W, lse_data,
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 1),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 1), lse_data,
                  SAD_BLOCK_SIZE, payload, index);
-  process_stride(currbufferView + (IMG_W * 2), prevbufferView + (IMG_W * 2),
-                 lse_data, SAD_BLOCK_SIZE * 2, payload, index);
-  process_stride(currbufferView + (IMG_W * 3), prevbufferView + (IMG_W * 3),
-                 lse_data, SAD_BLOCK_SIZE * 3, payload, index);
-  process_stride(currbufferView + (IMG_W * 4), prevbufferView + (IMG_W * 4),
-                 lse_data, SAD_BLOCK_SIZE * 4, payload, index);
-  process_stride(currbufferView + (IMG_W * 5), prevbufferView + (IMG_W * 5),
-                 lse_data, SAD_BLOCK_SIZE * 5, payload, index);
-  process_stride(currbufferView + (IMG_W * 6), prevbufferView + (IMG_W * 6),
-                 lse_data, SAD_BLOCK_SIZE * 6, payload, index);
-  process_stride(currbufferView + (IMG_W * 7), prevbufferView + (IMG_W * 7),
-                 lse_data, SAD_BLOCK_SIZE * 7, payload, index);
-  process_stride(currbufferView + (IMG_W * 8), prevbufferView + (IMG_W * 8),
-                 lse_data, SAD_BLOCK_SIZE * 8, payload, index);
-  process_stride(currbufferView + (IMG_W * 9), prevbufferView + (IMG_W * 9),
-                 lse_data, SAD_BLOCK_SIZE * 9, payload, index);
-  process_stride(currbufferView + (IMG_W * 10), prevbufferView + (IMG_W * 10),
-                 lse_data, SAD_BLOCK_SIZE * 10, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 2),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 2), lse_data,
+                 SAD_BLOCK_SIZE * 2, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 3),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 3), lse_data,
+                 SAD_BLOCK_SIZE * 3, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 4),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 4), lse_data,
+                 SAD_BLOCK_SIZE * 4, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 5),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 5), lse_data,
+                 SAD_BLOCK_SIZE * 5, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 6),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 6), lse_data,
+                 SAD_BLOCK_SIZE * 6, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 7),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 7), lse_data,
+                 SAD_BLOCK_SIZE * 7, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 8),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 8), lse_data,
+                 SAD_BLOCK_SIZE * 8, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 9),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 9), lse_data,
+                 SAD_BLOCK_SIZE * 9, payload, index);
+  process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 10),
+                 prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 10), lse_data,
+                 SAD_BLOCK_SIZE * 10, payload, index);
 
   LSE_solution solution = solve_lse(lse_data);
 

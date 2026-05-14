@@ -15,7 +15,6 @@ extern "C" {
 #define APP_TX_DATA_SIZE (1024)
 #define CENTER_COL (47)
 #define CENTER_ROW (47)
-#define WORK_QUEUE_SIZE (2)
 #define SAD_BLOCK_SIZE (8)
 #define SEARCH_SIZE (4)
 #define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)

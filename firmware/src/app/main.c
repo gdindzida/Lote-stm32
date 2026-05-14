@@ -8,13 +8,12 @@
 #include "system/sysmem.h"
 #include "usb/usb_device.h"
 #include "usb/usbd_cdc_if.h"
+#include <stdbool.h>
 #include <string.h>
 
 void SystemClock_Config(void);
 
-volatile WorkPackageType work_queue[WORK_QUEUE_SIZE] = {0};
-volatile uint8_t current_queue_in_index = 0;
-volatile uint8_t current_queue_out_index = 0;
+volatile WorkPackageType currentWorkType = NO_WORK;
 static Payload payload = {};
 
 /**
@@ -30,27 +29,22 @@ int main(void) {
   MX_USB_Device_Init();
   DWT_Init();
 
-  uint8_t isFirst = 1;
+  bool isFirst = true;
 
   while (1) {
     __disable_irq();
-    WorkPackageType work_package_type = NO_WORK;
-    if (current_queue_in_index != current_queue_out_index) {
-      work_package_type = work_queue[current_queue_out_index];
-      current_queue_out_index++;
-      current_queue_out_index %= WORK_QUEUE_SIZE;
-    }
+    WorkPackageType work_package_type = currentWorkType;
     __enable_irq();
 
     if (work_package_type != NO_WORK) {
       int16_t length = 0;
-      if (isFirst == 0) {
+      if (isFirst == false) {
         process_data(&payload, work_package_type);
         length = sizeof(Payload); // sizeof(PacketHeader) + sizeof(Metadata);
         memcpy(UserTxBufferFS, &payload, length);
         CDC_Transmit_FS(UserTxBufferFS, length);
       } else {
-        isFirst = 0;
+        isFirst = true;
       }
     }
   }
@@ -106,6 +100,8 @@ void SystemClock_Config(void) {
 void Error_Handler(void) {
   __disable_irq();
   while (1) {
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_6);
+    HAL_Delay(500);
   }
 }
 
