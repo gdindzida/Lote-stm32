@@ -45,8 +45,12 @@ add_link_options(
 )
 
 include_directories(
-    # Application headers
+    # Application headers - modular structure
     inc
+    inc/app
+    inc/bsp
+    inc/usb
+    inc/system
 
     # CMSIS core
     drivers/cmsis/include
@@ -61,22 +65,32 @@ include_directories(
     middlewares/st/stm32_usb_device_library/class/cdc/inc
 )
 
-# Application sources
+# Application sources - modular structure
 set(APP_SOURCES
-    src/main.c
-    src/data_processor.cpp
-    src/dwt.c
-    src/dma.c
-    src/gpio.c
-    src/usb_device.c
-    src/usbd_cdc_if.c
-    src/usbd_conf.c
-    src/usbd_desc.c
-    src/stm32g4xx_hal_msp.c
-    src/stm32g4xx_it.c
-    src/system_stm32g4xx.c
-    src/syscall.c
-    src/sysmem.c
+    # Application layer
+    src/app/main.c
+    src/app/data_processor.cpp
+    
+    # BSP layer
+    src/bsp/dwt.c
+    src/bsp/dma.c
+    src/bsp/gpio.c
+    
+    # USB layer
+    src/usb/usb_device.c
+    src/usb/usbd_cdc_if.c
+    src/usb/usbd_conf.c
+    src/usb/usbd_desc.c
+    
+    # System layer
+    src/system/stm32g4xx_hal_msp.c
+    src/system/stm32g4xx_it.c
+    src/system/system_stm32g4xx.c
+    src/system/syscall.c
+    src/system/sysmem.c
+    src/system/system_clock.c
+    src/system/error_handler.c
+    src/system/assert_handler.c
 )
 
 # HAL driver sources
@@ -127,9 +141,9 @@ add_custom_command(TARGET firmware.elf POST_BUILD
 
 # Suppress warnings in ST-generated and middleware files
 set_source_files_properties(
-    src/usbd_cdc_if.c
-    src/usbd_conf.c
-    src/usbd_desc.c
+    src/usb/usbd_cdc_if.c
+    src/usb/usbd_conf.c
+    src/usb/usbd_desc.c
     middlewares/st/stm32_usb_device_library/core/src/usbd_core.c
     middlewares/st/stm32_usb_device_library/core/src/usbd_ctlreq.c
     middlewares/st/stm32_usb_device_library/core/src/usbd_ioreq.c

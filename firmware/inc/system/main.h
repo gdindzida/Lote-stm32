@@ -6,8 +6,10 @@ extern "C" {
 #endif
 
 #include "stm32g4xx_hal.h"
+#include "system/assert_handler.h"
+#include "system/error_handler.h"
+#include "system/system_clock.h"
 
-void Error_Handler(void);
 
 #ifdef __cplusplus
 }

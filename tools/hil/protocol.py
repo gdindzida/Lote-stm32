@@ -2,14 +2,11 @@ from dataclasses import dataclass
 
 # STM32 binary protocol constants
 MAGIC = 0xABCD
-PACKET_SIZE = 64  # USB FS CDC max OUT packet size (matches firmware PACKET_SIZE)
-APP_RX_BUFFER_SIZE = (
-    9216  # one image frame in bytes (matches firmware APP_RX_BUFFER_SIZE)
-)
-HEADER_FMT = "<HH"
+PACKET_SIZE = 64
+SEND_HEADER_FMT = "<HHffffffffffffff"
+RECV_HEADER_FMT = "<HH"
+APP_RX_BUFFER_SIZE = 9216
 METADATA_FMT = "<IhhHfffff"
-# Each Coordinate is two signed int16_t fields (row=u, col=v) plus one uint8_t bool
-# (valid = min_sad < SAD_CEILING) as packed by the firmware.
 COORD_FMT = "<hhB"
 NUM_COORDS = 121  # 11 columns × 11 rows
 
@@ -22,9 +19,9 @@ class Metadata:
     num_points: int
     stack_mem_usage: float
     heap_mem_usage: float
-    tx: float
-    ty: float
-    theta: float
+    vx: float
+    vy: float
+    omega: float
 
 
 @dataclass

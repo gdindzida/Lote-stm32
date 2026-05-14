@@ -15,13 +15,13 @@ extern "C" {
 #define APP_TX_DATA_SIZE (1024)
 #define CENTER_COL (47)
 #define CENTER_ROW (47)
-#define WORK_QUEUE_SIZE (2)
 #define SAD_BLOCK_SIZE (8)
 #define SEARCH_SIZE (4)
 #define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
 #define K_FACTOR (2)
-#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 5)
+#define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 10)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
+#define VAR_MIN (30)
 
 // NOLINTNEXTLINE
 typedef enum {
@@ -37,12 +37,34 @@ typedef struct __attribute__((packed)) {
   bool valid;
 } Coordinate;
 
-// NOLINTNEXTLINE
+// PacketHeader received FROM host (sent with each frame)
 typedef struct __attribute__((packed)) {
-  uint16_t magic;
-  uint16_t length;
-} PacketHeader;
+  uint16_t magic;  // Magic number (0xABCD)
+  uint16_t length; // Payload length
+  // Input metadata: pose and timing (28 bytes)
+  float dt;  // Time since previous frame (seconds)
+  float h;   // Height
+  float a_x; //
+  float a_y; //
+  float a_z; //
+  float w_x; // Roll angle (radians)
+  float w_y; // Pitch angle (radians)
+  float w_z; // Yaw angle (radians)
+  // Camera calibration parameters (24 bytes)
+  float fx; // Focal length x (pixels)
+  float fy; // Focal length y (pixels)
+  float cx; // Principal point x (pixels)
+  float cy; // Principal point y (pixels)
+  float k1; // Radial distortion coefficient 1
+  float k2; // Radial distortion coefficient 2
+} RecvPacketHeader;
 
+typedef struct __attribute__((packed)) {
+  uint16_t magic;  // Magic number (0xABCD)
+  uint16_t length; // Payload length
+} SendPacketHeader;
+
+// Output metadata sent TO host (processing results)
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint32_t elapsed_time_ms;
@@ -51,14 +73,14 @@ typedef struct __attribute__((packed)) {
   uint16_t num_points;
   float stack_mem_usage;
   float heap_mem_usage;
-  float tx;
-  float ty;
-  float theta;
+  float vx;
+  float vy;
+  float omega;
 } Metadata;
 
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
-  PacketHeader header;
+  SendPacketHeader header;
   Metadata metadata;
   Coordinate coordinates[121];
 } Payload;

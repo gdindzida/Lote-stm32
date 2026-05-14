@@ -1,16 +1,18 @@
-#include "usbd_cdc_if.h"
-#include "app_types.h"
+#include "usb/usbd_cdc_if.h"
+#include "app/app_types.h"
 #include "usbd_cdc.h"
 #include "usbd_def.h"
 #include <stdint.h>
 
 // new
 extern USBD_HandleTypeDef hUsbDeviceFS;
-extern volatile WorkPackageType work_queue[WORK_QUEUE_SIZE];
-extern volatile uint8_t current_queue_in_index;
-uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
-volatile uint32_t rxBufferOffset = 0;
+extern volatile WorkPackageType currentWorkType;
+extern volatile uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+extern volatile uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+extern volatile uint32_t rxBufferOffset;
+
+extern volatile RecvPacketHeader current_packet_header;
+extern volatile RecvPacketHeader previous_packet_header;
 
 typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
 static volatile RxStateType rxState = RX_WAIT_FOR_MAGIC;
@@ -134,11 +136,16 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
   switch (rxState) {
 
   case RX_WAIT_FOR_MAGIC: {
-    PacketHeader *hdr = (PacketHeader *)(UserRxBufferFS + rxBufferOffset);
+    RecvPacketHeader *hdr =
+        (RecvPacketHeader *)(UserRxBufferFS + rxBufferOffset);
     if (hdr->magic == MAGIC) {
       rxBytesReceived = 0;
       rxState = RX_RECEIVING_DATA;
     }
+
+    previous_packet_header = current_packet_header;
+    current_packet_header = *hdr;
+
     /* Always reset RX pointer to start of slot so magic bytes are
      * overwritten by the first image data packet. */
     USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
@@ -153,12 +160,10 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
       rxState = RX_WAIT_FOR_MAGIC;
 
       if (rxBufferOffset == 0) {
-        work_queue[current_queue_in_index] = PROCESS_RX_1;
+        currentWorkType = PROCESS_RX_1;
       } else {
-        work_queue[current_queue_in_index] = PROCESS_RX_2;
+        currentWorkType = PROCESS_RX_2;
       }
-      current_queue_in_index++;
-      current_queue_in_index %= WORK_QUEUE_SIZE;
 
       rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
       USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);

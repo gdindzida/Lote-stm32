@@ -1,14 +1,14 @@
-import queue
 import struct
+import queue
 import threading
 import time
-from typing import List, Optional
-
+from typing import List, Optional, Dict, Any
 import serial
-
-from hil.frames import FrameItem, FrameRecord, scale_image
+from hil.csv_dataset import CsvDatasetStreamer
+from hil.frames import FrameItem, FrameReadEvent, FrameWriteEvent
 from hil.protocol import (
-    HEADER_FMT,
+    SEND_HEADER_FMT,
+    RECV_HEADER_FMT,
     MAGIC,
     METADATA_FMT,
     COORD_FMT,
@@ -18,22 +18,18 @@ from hil.protocol import (
     Metadata,
     Coordinate,
 )
-from hil.streamer import DatasetStreamer
 
 
 def writer_thread_fn(
     ser: serial.Serial,
-    streamer: DatasetStreamer,
-    frame_queue: "queue.Queue[Optional[FrameItem]]",
+    streamer: CsvDatasetStreamer,
     write_freq_hz: Optional[float],
-    do_record: bool,
-    frame_write_times: List[float],
-    missed_frames: List[int],
-    missed_frame_times: List[float],
+    frame_writes: List[FrameWriteEvent],
+    frame_queue: "queue.Queue[Optional[FrameItem]]",
     frame_buffer_sem: threading.Semaphore,
     error_event: threading.Event,
     stop_event: threading.Event,
-    frame_deadline_times: List[float],
+    calibration: Dict[str, float],
 ):
     """Reads frames from the streamer, writes them to serial, and enqueues frame data for the reader.
 
@@ -48,92 +44,172 @@ def writer_thread_fn(
     ``missed_frames[0]``; its absolute timestamp is appended to
     ``missed_frame_times``.
 
-    Timing uses absolute deadlines anchored to the first-frame write time
-    (``t0``).  Deadline for frame *n* is ``t0 + n * period``.  This prevents
-    drift accumulation that occurs when sleeping only for the remaining portion
-    of the previous interval.  The deadline of every successfully sent frame is
-    appended to ``frame_deadline_times``; the actual write timestamp is appended
+    Timing behavior:
+    - When write_freq_hz is defined: Uses camera timestamps from the CSV dataset
+      to compute inter-frame delays. This preserves the original timing from the dataset.
+    - When write_freq_hz is None: Maximum throughput mode (no throttling).
+
+    The deadline of every successfully sent frame is appended to
+    ``frame_deadline_times``; the actual write timestamp is appended
     to ``frame_write_times``.
     """
+    # Check if streamer provides timestamps (CsvDatasetStreamer always does)
+    use_dataset_timestamps = write_freq_hz is None
+
+    if use_dataset_timestamps and write_freq_hz is not None:
+        print("Using camera timestamps from dataset for frame timing")
+
     period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
 
     # --- First frame (sent before the main loop) ---
-    result = streamer.next()
-    if result is None:
-        print("Images are None!")
-        error_event.set()
-        frame_queue.put(None)
-        return
+    image = streamer.next()
 
-    left_img, right_img = result
-
-    if left_img is None:
+    if image is None:
         print("Left image is None!")
         error_event.set()
-        frame_queue.put(None)
-        return
-
-    if right_img is None:
-        print("Right image is None!")
-        error_event.set()
-        frame_queue.put(None)
         return
 
     frame_number: int = 0
 
-    small_img = scale_image(left_img)
-    print(left_img.shape)
-    print(small_img.shape)
-    img_data = small_img.tobytes()
+    print("Image shape: ", image.shape)
+    img_data = image.tobytes()
 
-    # Build a sync packet: PacketHeader (magic + length) padded to PACKET_SIZE bytes.
-    # Padding to exactly PACKET_SIZE guarantees it is flushed as its own USB FS
-    # bulk OUT packet and is not coalesced with the following image data.
-    sync_pkt = struct.pack(HEADER_FMT, MAGIC, APP_RX_BUFFER_SIZE).ljust(
-        PACKET_SIZE, b"\x00"
+    entry: Dict[str, Any] = streamer.entries[0]  # type: ignore
+
+    # print(
+    #     "debug: Packet header contains: ",
+    #     MAGIC,
+    #     APP_RX_BUFFER_SIZE,
+    #     0.0,  # dt = 0 for first frame
+    #     float(entry.get("p_z", 0.0)),
+    #     float(entry.get("acc_x", 0.0)),
+    #     float(entry.get("acc_y", 0.0)),
+    #     float(entry.get("acc_z", 0.0)),
+    #     float(entry.get("gyro_x", 0.0)),
+    #     float(entry.get("gyro_y", 0.0)),
+    #     float(entry.get("gyro_z", 0.0)),
+    #     calibration["fx"],
+    #     calibration["fy"],
+    #     calibration["cx"],
+    #     calibration["cy"],
+    #     calibration["k1"],
+    #     calibration["k2"],
+    # )
+    packet_header = struct.pack(
+        SEND_HEADER_FMT,
+        MAGIC,
+        APP_RX_BUFFER_SIZE,
+        0.0,  # dt = 0 for first frame
+        float(entry.get("p_z", 0.0)),
+        float(entry.get("acc_x", 0.0)),
+        float(entry.get("acc_y", 0.0)),
+        float(entry.get("acc_z", 0.0)),
+        float(entry.get("gyro_x", 0.0)),
+        float(entry.get("gyro_y", 0.0)),
+        float(entry.get("gyro_z", 0.0)),
+        calibration["fx"],
+        calibration["fy"],
+        calibration["cx"],
+        calibration["cy"],
+        calibration["k1"],
+        calibration["k2"],
     )
 
-    # Acquire one MCU buffer slot for the first frame (always available at start).
-    frame_buffer_sem.acquire()
+    # Pad to PACKET_SIZE to ensure separate USB packet
+    sync_pkt = packet_header.ljust(PACKET_SIZE, b"\x00")
+
     frame_write_time = time.time()
-    # t0 is the absolute origin for all subsequent deadlines.
-    t0: float = frame_write_time
     ser.write(sync_pkt)
     ser.write(img_data)
-    frame_write_times.append(frame_write_time)
-    frame_deadline_times.append(t0)  # deadline for frame 0 is t0 by definition
-    # Enqueue the frame images so the reader can build a FrameRecord
-    # frame_queue.put(
-    #     FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
-    # )
+    frame_writes.append(FrameWriteEvent(frame_write_time, frame_write_time, False))
+    t0 = frame_write_time
 
     # --- Subsequent frames ---
     while streamer.has_next() and not stop_event.is_set():
-        result = streamer.next()
-        if result is None:
-            print("Images are None!")
+        image = streamer.next()
+
+        if image is None:
+            print("Image is None!")
             continue
-
-        left_img, right_img = result
-
-        if left_img is None:
-            print("Left image is None!")
-            continue
-
-        if right_img is None:
-            print("Right image is None!")
-            continue
-
         frame_number += 1
 
-        small_img = scale_image(left_img)
-        img_data = small_img.tobytes()
+        img_data = image.tobytes()
 
-        # Absolute-deadline throttling: sleep until the scheduled send time for
-        # this frame number.  Using an absolute deadline (t0 + n * period) rather
-        # than sleeping for "period - elapsed" prevents drift accumulation across
-        # frames.
-        if period > 0.0:
+        # Get current frame metadata from dataset
+        curr_idx = streamer.index - 1  # type: ignore
+        prev_idx = curr_idx - 1
+        entry = streamer.entries[curr_idx]  # type: ignore
+        prev_entry = streamer.entries[prev_idx]  # type: ignore
+
+        # Calculate dt from timestamps
+        curr_ts = float(entry.get("timestamp_cam", 0.0))
+        prev_ts = float(prev_entry.get("timestamp_cam", 0.0))
+        dt = curr_ts - prev_ts
+
+        # Build PacketHeader with current frame metadata and calibration
+        # print(
+        #     "debug: Packet header contains: ",
+        #     MAGIC,
+        #     APP_RX_BUFFER_SIZE,
+        #     dt,  # dt = 0 for first frame
+        #     float(entry.get("p_z", 0.0)),
+        #     float(entry.get("acc_x", 0.0)),
+        #     float(entry.get("acc_y", 0.0)),
+        #     float(entry.get("acc_z", 0.0)),
+        #     float(entry.get("gyro_x", 0.0)),
+        #     float(entry.get("gyro_y", 0.0)),
+        #     float(entry.get("gyro_z", 0.0)),
+        #     calibration["fx"],
+        #     calibration["fy"],
+        #     calibration["cx"],
+        #     calibration["cy"],
+        #     calibration["k1"],
+        #     calibration["k2"],
+        # )
+        packet_header = struct.pack(
+            SEND_HEADER_FMT,
+            MAGIC,
+            APP_RX_BUFFER_SIZE,
+            dt,
+            float(entry.get("p_z", 0.0)),
+            float(entry.get("acc_x", 0.0)),
+            float(entry.get("acc_y", 0.0)),
+            float(entry.get("acc_z", 0.0)),
+            float(entry.get("gyro_x", 0.0)),
+            float(entry.get("gyro_y", 0.0)),
+            float(entry.get("gyro_z", 0.0)),
+            calibration["fx"],
+            calibration["fy"],
+            calibration["cx"],
+            calibration["cy"],
+            calibration["k1"],
+            calibration["k2"],
+        )
+
+        # Pad to PACKET_SIZE to ensure separate USB packet
+        sync_pkt = packet_header.ljust(PACKET_SIZE, b"\x00")
+
+        # Compute deadline for this frame:
+        # - If dataset timestamps available: use relative time from dataset
+        # - Otherwise: use fixed-frequency timing with absolute deadlines
+        if use_dataset_timestamps:
+            deadline = frame_write_time + dt
+            sleep_time = deadline - time.time()
+            # print(
+            #     "curr index: ",
+            #     curr_idx,
+            #     ", prev index: ",
+            #     prev_idx,
+            #     ", sleep time: ",
+            #     sleep_time,
+            #     ", curr timestamp: ",
+            #     curr_ts,
+            #     ", prev timestamp: ",
+            #     prev_ts,
+            # )
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+        elif period > 0.0:
             deadline = t0 + frame_number * period
             sleep_time = deadline - time.time()
             if sleep_time > 0:
@@ -142,24 +218,17 @@ def writer_thread_fn(
             deadline = time.time()
 
         # Check whether the MCU has finished processing the last two frames.
-        # The STM32 has a 2-frame receive buffer modelled by frame_buffer_sem.
-        # A non-blocking acquire fails when both slots are occupied, meaning
-        # the MCU has not yet responded to either outstanding frame.
-        # We have already waited until the deadline above so the timing cadence
-        # is preserved regardless of whether we send or skip.
         if not frame_buffer_sem.acquire(blocking=False):
-            missed_frames[0] += 1
-            missed_frame_times.append(time.time())
+            frame_writes.append(FrameWriteEvent(time.time(), deadline, True))
             continue
 
         frame_write_time = time.time()
         ser.write(sync_pkt)
         ser.write(img_data)
-        frame_write_times.append(frame_write_time)
-        frame_deadline_times.append(deadline)
-        frame_queue.put(
-            FrameItem(small_img.copy(), left_img.copy(), frame_write_time, frame_number)
-        )
+
+        frame_writes.append(FrameWriteEvent(frame_write_time, deadline, False))
+
+        frame_queue.put(FrameItem(image.copy(), frame_number))
 
     # Signal the reader that no more frames will be written (None = sentinel)
     frame_queue.put(None)
@@ -167,16 +236,11 @@ def writer_thread_fn(
 
 def reader_thread_fn(
     ser: serial.Serial,
+    frame_reads: List[FrameReadEvent],
     frame_queue: "queue.Queue[Optional[FrameItem]]",
-    do_record: bool,
-    process_elapsed_times: List[float],
-    recorded_frames: List[FrameRecord],
-    peak_memory: List[float],  # [peak_stack, peak_heap]
     frame_buffer_sem: threading.Semaphore,
     error_event: threading.Event,
     total: int,
-    frame_loop_times: List[float],
-    frame_meta_list: "List[tuple[int, float, float, float]] | None" = None,
 ):
     """Reads serial responses and collects statistics / records frames.
 
@@ -198,6 +262,7 @@ def reader_thread_fn(
 
         if item is None:
             # None sentinel: no more frames; reader is done
+            frame_buffer_sem.release()
             break
 
         iter += 1
@@ -205,20 +270,22 @@ def reader_thread_fn(
         print(f"Reading frame number: {item.frame_number} / {total}")
         print(f"Frames read: {iter} / {total}")
 
-        small_img = item.small_img
-        left_img = item.left_img
+        image = item.image
 
         # Read header
-        header_bytes = ser.read(struct.calcsize(HEADER_FMT))
-        if len(header_bytes) < struct.calcsize(HEADER_FMT):
+        header_bytes = ser.read(struct.calcsize(RECV_HEADER_FMT))
+        if len(header_bytes) < struct.calcsize(RECV_HEADER_FMT):
             print("Reader: timeout waiting for header")
             print("")
-            frame_buffer_sem.release()
             continue
             # error_event.set()
             # break
 
-        magic, length = struct.unpack(HEADER_FMT, header_bytes)
+        # Unpack header: magic, length, and all the metadata/calibration fields
+        header_data = struct.unpack(RECV_HEADER_FMT, header_bytes)
+        magic = header_data[0]
+        length = header_data[1]
+        # header_data[2:] contains dt, p_x, p_y, p_z, roll, pitch, yaw, fx, fy, cx, cy, k1, k2
         print("Size of header: ", len(header_bytes))
         if magic != MAGIC:
             print(f"Reader: bad magic: {hex(magic)}")
@@ -227,20 +294,15 @@ def reader_thread_fn(
             break
 
         payload = ser.read(length)
+        frame_buffer_sem.release()
         if len(payload) < length:
             print("Reader: timeout waiting for payload")
-            frame_buffer_sem.release()
             error_event.set()
             break
 
         # Record write-to-read latency: time from when the writer sent this
         # frame to now (the moment the full MCU response has been received).
         read_time = time.time()
-        frame_loop_times.append(read_time - item.write_time)
-
-        # MCU has finished processing this frame — release its buffer slot so
-        # the writer knows it may send another frame.
-        frame_buffer_sem.release()
 
         print("Got payload of size: ", len(payload))
 
@@ -248,41 +310,25 @@ def reader_thread_fn(
         meta_raw = struct.unpack(METADATA_FMT, payload[:meta_size])
         meta = Metadata(*meta_raw)
 
-        process_elapsed_times.append(meta.process_elapsed_time_ms)
-        peak_memory[0] = meta.stack_mem_usage
-        peak_memory[1] = meta.heap_mem_usage
         print("Got this many valid points: ", meta.num_points)
         print("u_sum: ", meta.u_sum, ", v_sum: ", meta.v_sum)
-        print("tx: ", meta.tx, ", ty: ", meta.ty, ", theta: ", meta.theta)
+        print("vx: ", meta.vx, ", vy: ", meta.vy, ", omega: ", meta.omega)
         print("Peak stack memory: ", meta.stack_mem_usage)
         print("Heap mem usage: ", meta.heap_mem_usage)
         print("")
 
-        # Collect (frame_number, tx, ty, theta) for KPI computation when requested.
-        if frame_meta_list is not None:
-            frame_meta_list.append((item.frame_number, meta.tx, meta.ty, meta.theta))
-
-        if do_record:
-            # Parse the NUM_COORDS optical-flow vectors that follow the metadata.
-            # Each Coordinate is two signed int16_t values: (u=row, v=col) as packed
-            # by the firmware's Coordinate struct {int16_t row; int16_t col;}.
-            coord_size = struct.calcsize(COORD_FMT)
-            coords: List[Coordinate] = []
-            for i in range(NUM_COORDS):
-                offset = meta_size + i * coord_size
-                u, v, valid = struct.unpack(
-                    COORD_FMT, payload[offset : offset + coord_size]
-                )
-                coords.append(Coordinate(u=u, v=v, valid=bool(valid)))
-
-            recorded_frames.append(
-                FrameRecord(
-                    small_img=small_img,
-                    left_img=left_img,
-                    payload=payload,
-                    meta=meta,
-                    meta_size=meta_size,
-                    timestamp=time.time(),
-                    coords=coords,
-                )
+        # Parse the NUM_COORDS optical-flow vectors that follow the metadata.
+        # Each Coordinate is two signed int16_t values: (u=row, v=col) as packed
+        # by the firmware's Coordinate struct {int16_t row; int16_t col;}.
+        coord_size = struct.calcsize(COORD_FMT)
+        coords: List[Coordinate] = []
+        for i in range(NUM_COORDS):
+            offset = meta_size + i * coord_size
+            u, v, valid = struct.unpack(
+                COORD_FMT, payload[offset : offset + coord_size]
             )
+            coords.append(Coordinate(u=u, v=v, valid=bool(valid)))
+
+        frame_reads.append(
+            FrameReadEvent(read_time, image, payload, item.frame_number, meta, coords)
+        )
