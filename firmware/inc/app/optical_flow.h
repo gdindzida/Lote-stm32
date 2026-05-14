@@ -13,24 +13,16 @@ struct Corner {
   uint32_t score;
 };
 
-struct LSE_data {
-  uint8_t N;
-  float u_sum;
-  float v_sum;
-  float rx_sum;
-  float ry_sum;
-  float rx2_sum;
-  float ry2_sum;
-  float rxv_sum;
-  float ryu_sum;
+#define HISTOGRAM_SIZE ((SEARCH_SIZE * 2) + 1)
+struct Histogram {
+  uint8_t colOffsets[HISTOGRAM_SIZE];
+  uint8_t rowOffsets[HISTOGRAM_SIZE];
 };
 
-struct LSE_solution {
-  float tx;
-  float ty;
-  float theta;
+struct HistogramUV {
   float u;
   float v;
+  int N;
 };
 
 void process_data(Payload *payload, WorkPackageType work_package_type);

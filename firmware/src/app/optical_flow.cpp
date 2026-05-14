@@ -49,9 +49,8 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
 }
 
 void process_stride(volatile const uint8_t *curr_img_stride,
-                    volatile const uint8_t *prev_img_stride, LSE_data &lse_data,
-                    uint8_t stride_row_offset, Payload *payload,
-                    int32_t &index) {
+                    volatile const uint8_t *prev_img_stride, Histogram &hist,
+                    Payload *payload, int32_t &index) {
 
   for (int blockIndex = 0; blockIndex < NUMBER_OF_BLOCKS_PER_STRIDE;
        ++blockIndex) {
@@ -59,9 +58,10 @@ void process_stride(volatile const uint8_t *curr_img_stride,
     minCol = blockIndex * SAD_BLOCK_SIZE;
     maxCol = (blockIndex + 2) * SAD_BLOCK_SIZE;
 
-    int min_sad = SAD_MAX;
-    int16_t colOffset = 0;
-    int16_t rowOffset = 0;
+    volatile int min_sad = SAD_MAX;
+
+    volatile int16_t colOffset = 0;
+    volatile int16_t rowOffset = 0;
 
     Coordinate current_start = {
         static_cast<int16_t>(SEARCH_SIZE),
@@ -121,52 +121,66 @@ void process_stride(volatile const uint8_t *curr_img_stride,
     index++;
 
     if (min_sad < SAD_CEILING) {
-      float weight = 1.0f / (1.0f + min_sad);
+      hist.colOffsets[colOffset + SEARCH_SIZE]++;
+      hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
       payload->coordinates[index - 1].valid = true;
-      uint8_t gx = SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) +
-                   (SAD_BLOCK_SIZE * blockIndex);
-      uint8_t gy = SEARCH_SIZE + (SAD_BLOCK_SIZE / 2 - 1) + stride_row_offset;
-
-      int32_t rx = static_cast<int32_t>(gx) - CENTER_COL;
-      int32_t ry = CENTER_ROW - static_cast<int32_t>(gy);
-
-      lse_data.N++;
-      lse_data.u_sum += weight * colOffset;
-      lse_data.v_sum += weight * rowOffset;
-      lse_data.rx_sum += weight * rx;
-      lse_data.ry_sum += weight * ry;
-      lse_data.rx2_sum += weight * rx * rx;
-      lse_data.ry2_sum += weight * ry * ry;
-      lse_data.rxv_sum += weight * rx * rowOffset;
-      lse_data.ryu_sum += weight * ry * colOffset;
     }
   }
 }
 
-LSE_solution solve_lse(LSE_data &lse_data) {
-  LSE_solution sol{};
+HistogramUV findMax(Histogram &hist) {
+  uint8_t maxIndexCol = 0;
+  uint8_t maxCountCol = hist.colOffsets[0];
+  uint8_t maxIndexRow = 0;
+  uint8_t maxCountRow = hist.rowOffsets[0];
 
-  if (lse_data.N > 0) {
-    sol.theta = ((lse_data.N * (lse_data.ryu_sum - lse_data.rxv_sum)) -
-                 (lse_data.ry_sum * lse_data.u_sum) +
-                 (lse_data.rx_sum * lse_data.v_sum)) /
-                ((lse_data.rx_sum * lse_data.rx_sum) +
-                 (lse_data.ry_sum * lse_data.ry_sum) -
-                 (lse_data.N * (lse_data.rx2_sum + lse_data.ry2_sum)));
+  int N = hist.rowOffsets[0];
 
-    sol.tx = ((lse_data.u_sum) + ((lse_data.ry_sum) * sol.theta)) /
-             static_cast<float>(lse_data.N);
+  for (int histIndex = 1; histIndex < HISTOGRAM_SIZE; histIndex++) {
+    if (hist.colOffsets[histIndex] > maxCountCol) {
+      maxIndexCol = histIndex;
+      maxCountCol = hist.colOffsets[histIndex];
+    }
+    if (hist.rowOffsets[histIndex] > maxCountRow) {
+      maxIndexRow = histIndex;
+      maxCountRow = hist.rowOffsets[histIndex];
+    }
 
-    sol.ty = ((lse_data.v_sum) - ((lse_data.rx_sum) * sol.theta)) /
-             static_cast<float>(lse_data.N);
-
-    sol.u = sol.tx -
-            ((lse_data.ry_sum) * sol.theta / static_cast<float>(lse_data.N));
-    sol.v = sol.ty +
-            ((lse_data.rx_sum) * sol.theta / static_cast<float>(lse_data.N));
+    N += hist.rowOffsets[histIndex];
   }
 
-  return sol;
+  int histMinColIndex = MAX(maxIndexCol - 0, 0);
+  int histMaxColIndex = MIN(maxIndexCol + 0, HISTOGRAM_SIZE - 1);
+
+  int histMinRowIndex = MAX(maxIndexRow - 0, 0);
+  int histMaxRowIndex = MIN(maxIndexRow + 0, HISTOGRAM_SIZE - 1);
+
+  float sumU = 0.F;
+  uint8_t nU = 0;
+  float sumV = 0.F;
+  uint8_t nV = 0;
+
+  for (int histIndex = histMinColIndex; histIndex <= histMaxColIndex;
+       ++histIndex) {
+    sumU += static_cast<float>(hist.colOffsets[histIndex]) *
+            static_cast<float>(histIndex - SEARCH_SIZE);
+
+    nU += hist.colOffsets[histIndex];
+  }
+
+  for (int histIndex = histMinRowIndex; histIndex <= histMaxRowIndex;
+       ++histIndex) {
+    sumV += static_cast<float>(hist.rowOffsets[histIndex]) *
+            static_cast<float>(histIndex - SEARCH_SIZE);
+
+    nV += hist.rowOffsets[histIndex];
+  }
+
+  if (nU > 0 && nV > 0) {
+    return {sumU / static_cast<float>(nU), sumV / static_cast<float>(nV), N};
+  }
+
+  return {0, 0, 0};
 }
 
 } // namespace
@@ -189,7 +203,7 @@ extern "C" void process_data(Payload *payload,
     prevbufferView = UserRxBufferFS;
   }
 
-  LSE_data lse_data{};
+  Histogram hist{};
 
   int32_t coordIndex = 0;
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
@@ -200,57 +214,26 @@ extern "C" void process_data(Payload *payload,
 
     process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
                    prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
-                   lse_data, SAD_BLOCK_SIZE * strideIndex, payload, coordIndex);
+                   hist, payload, coordIndex);
   }
 
-  // process_stride(currbufferView, prevbufferView, lse_data, 0, payload,
-  // index); process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 1),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 1), lse_data,
-  //                SAD_BLOCK_SIZE, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 2),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 2), lse_data,
-  //                SAD_BLOCK_SIZE * 2, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 3),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 3), lse_data,
-  //                SAD_BLOCK_SIZE * 3, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 4),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 4), lse_data,
-  //                SAD_BLOCK_SIZE * 4, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 5),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 5), lse_data,
-  //                SAD_BLOCK_SIZE * 5, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 6),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 6), lse_data,
-  //                SAD_BLOCK_SIZE * 6, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 7),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 7), lse_data,
-  //                SAD_BLOCK_SIZE * 7, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 8),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 8), lse_data,
-  //                SAD_BLOCK_SIZE * 8, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 9),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 9), lse_data,
-  //                SAD_BLOCK_SIZE * 9, payload, index);
-  // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * 10),
-  //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * 10), lse_data,
-  //                SAD_BLOCK_SIZE * 10, payload, index);
+  HistogramUV histUV = findMax(hist);
 
-  LSE_solution solution = solve_lse(lse_data);
+  payload->metadata.sum_u = 0;
+  payload->metadata.sum_v = 0;
 
-  payload->metadata.sum_u = lse_data.u_sum;
-  payload->metadata.sum_v = lse_data.v_sum;
-  payload->metadata.num_points = lse_data.N;
+  payload->metadata.num_points = histUV.N;
   payload->metadata.vx =
-      MAX(MIN(-solution.u * current_packet_header.h /
+      MAX(MIN(-histUV.u * current_packet_header.h /
                   (current_packet_header.fx * current_packet_header.dt),
               1),
           -1);
   payload->metadata.vy =
-      MAX(MIN(-solution.v * current_packet_header.h /
+      MAX(MIN(-histUV.v * current_packet_header.h /
                   (current_packet_header.fy * current_packet_header.dt),
               1),
           -1);
-  payload->metadata.omega = solution.theta / current_packet_header.dt;
+  payload->metadata.omega = 0;
 
   payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
 
