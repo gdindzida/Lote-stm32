@@ -69,7 +69,7 @@ include_directories(
 set(APP_SOURCES
     # Application layer
     src/app/main.c
-    src/app/data_processor.cpp
+    src/app/optical_flow.cpp
     
     # BSP layer
     src/bsp/dwt.c

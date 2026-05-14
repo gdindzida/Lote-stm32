@@ -1,6 +1,6 @@
 #include "system/main.h"
 #include "app/app_types.h"
-#include "app/data_processor.h"
+#include "app/optical_flow.h"
 #include "bsp/dma.h"
 #include "bsp/dwt.h"
 #include "bsp/gpio.h"
@@ -9,10 +9,11 @@
 #include "system/sysmem.h"
 #include "usb/usb_device.h"
 #include "usb/usbd_cdc_if.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <string.h>
 
-// Static memory
+// app memory
 volatile WorkPackageType currentWorkType = NO_WORK;
 uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
@@ -36,18 +37,21 @@ int main(void) {
   MX_USB_Device_Init();
   DWT_Init();
 
+  // sanity checks
+  static_assert(sizeof(Payload) < APP_TX_DATA_SIZE,
+                "SANITY CHECK ERROR: Size of payload should be smaller than tx "
+                "data size.");
+
   bool isFirst = true;
 
   while (1) {
-    __disable_irq();
-    volatile WorkPackageType work_package_type = currentWorkType;
-    __enable_irq();
+    volatile WorkPackageType workPackageType = currentWorkType;
 
-    if (work_package_type != NO_WORK) {
+    if (workPackageType != NO_WORK) {
       int16_t length = 0;
       if (isFirst == false) {
-        process_data(&payload, work_package_type);
-        length = sizeof(Payload); // sizeof(PacketHeader) + sizeof(Metadata);
+        process_data(&payload, workPackageType);
+        length = sizeof(Payload);
         memcpy(UserTxBufferFS, &payload, length);
         CDC_Transmit_FS(UserTxBufferFS, length);
       } else {

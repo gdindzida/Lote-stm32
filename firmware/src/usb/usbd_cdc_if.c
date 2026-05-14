@@ -4,16 +4,18 @@
 #include "usbd_def.h"
 #include <stdint.h>
 
-// new
+// extern
 extern USBD_HandleTypeDef hUsbDeviceFS;
+
 extern volatile WorkPackageType currentWorkType;
-extern volatile uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-extern volatile uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 extern volatile uint32_t rxBufferOffset;
 
 extern volatile RecvPacketHeader current_packet_header;
 extern volatile RecvPacketHeader previous_packet_header;
 
+// local
 typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
 static volatile RxStateType rxState = RX_WAIT_FOR_MAGIC;
 static volatile uint32_t rxBytesReceived = 0;
@@ -21,7 +23,6 @@ static volatile uint32_t rxBytesReceived = 0;
 static int8_t CDC_Init_FS(void);
 static int8_t CDC_DeInit_FS(void);
 static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length);
-// static void App_CDC_Receive(uint8_t *buf, uint32_t len);
 static int8_t CDC_Receive_FS(uint8_t *pbuf, uint32_t *Len);
 static int8_t CDC_TransmitCplt_FS(uint8_t *pbuf, uint32_t *Len, uint8_t epnum);
 
@@ -136,15 +137,15 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
   switch (rxState) {
 
   case RX_WAIT_FOR_MAGIC: {
-    RecvPacketHeader *hdr =
+    RecvPacketHeader *receivedHeader =
         (RecvPacketHeader *)(UserRxBufferFS + rxBufferOffset);
-    if (hdr->magic == MAGIC) {
+    if (receivedHeader->magic == MAGIC) {
       rxBytesReceived = 0;
       rxState = RX_RECEIVING_DATA;
     }
 
     previous_packet_header = current_packet_header;
-    current_packet_header = *hdr;
+    current_packet_header = *receivedHeader;
 
     /* Always reset RX pointer to start of slot so magic bytes are
      * overwritten by the first image data packet. */

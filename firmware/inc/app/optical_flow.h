@@ -1,5 +1,5 @@
-#ifndef __DATA_PROCESSOR_H__
-#define __DATA_PROCESSOR_H__
+#ifndef __OPTICAL_FLOW_H__
+#define __OPTICAL_FLOW_H__
 
 #include "app/app_types.h"
 
@@ -39,4 +39,4 @@ void process_data(Payload *payload, WorkPackageType work_package_type);
 }
 #endif
 
-#endif /* __DATA_PROCESSOR_H__ */
+#endif /* __OPTICAL_FLOW_H__ */

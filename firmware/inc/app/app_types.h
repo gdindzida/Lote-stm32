@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include "app/image.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -22,6 +23,8 @@ extern "C" {
 #define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 10)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
 #define VAR_MIN (30)
+#define NUMBER_OF_STRIDES (((IMG_H) / (SAD_BLOCK_SIZE)) - 1)
+#define NUMBER_OF_BLOCKS_PER_STRIDE (((IMG_W) / (SAD_BLOCK_SIZE)) - 1)
 
 // NOLINTNEXTLINE
 typedef enum {
@@ -37,7 +40,7 @@ typedef struct __attribute__((packed)) {
   bool valid;
 } Coordinate;
 
-// PacketHeader received FROM host (sent with each frame)
+// NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint16_t magic;  // Magic number (0xABCD)
   uint16_t length; // Payload length
@@ -59,12 +62,12 @@ typedef struct __attribute__((packed)) {
   float k2; // Radial distortion coefficient 2
 } RecvPacketHeader;
 
+// NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint16_t magic;  // Magic number (0xABCD)
   uint16_t length; // Payload length
 } SendPacketHeader;
 
-// Output metadata sent TO host (processing results)
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
   uint32_t elapsed_time_ms;
