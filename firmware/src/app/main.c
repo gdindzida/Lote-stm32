@@ -45,7 +45,10 @@ int main(void) {
   bool isFirst = true;
 
   while (1) {
+    __disable_irq();
     volatile WorkPackageType workPackageType = currentWorkType;
+    currentWorkType = NO_WORK;
+    __enable_irq();
 
     if (workPackageType != NO_WORK) {
       int16_t length = 0;
