@@ -19,8 +19,7 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 volatile uint32_t rxBufferOffset = 0;
 
-volatile RecvPacketHeader current_packet_header = {0};
-volatile RecvPacketHeader previous_packet_header = {0};
+volatile RecvPacketHeader currentPacketHeader = {0};
 
 static Payload payload = {};
 
@@ -47,13 +46,14 @@ int main(void) {
   while (1) {
     __disable_irq();
     volatile WorkPackageType workPackageType = currentWorkType;
+    RecvPacketHeader localPacketHeader = currentPacketHeader;
     currentWorkType = NO_WORK;
     __enable_irq();
 
     if (workPackageType != NO_WORK) {
       int16_t length = 0;
       if (isFirst == false) {
-        process_data(&payload, workPackageType);
+        process_data(&payload, workPackageType, localPacketHeader);
         length = sizeof(Payload);
         memcpy(UserTxBufferFS, &payload, length);
         CDC_Transmit_FS(UserTxBufferFS, length);

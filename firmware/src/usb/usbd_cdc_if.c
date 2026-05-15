@@ -12,8 +12,7 @@ extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 extern volatile uint32_t rxBufferOffset;
 
-extern volatile RecvPacketHeader current_packet_header;
-extern volatile RecvPacketHeader previous_packet_header;
+extern volatile RecvPacketHeader currentPacketHeader;
 
 // local
 typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
@@ -142,10 +141,8 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
     if (receivedHeader->magic == MAGIC) {
       rxBytesReceived = 0;
       rxState = RX_RECEIVING_DATA;
+      currentPacketHeader = *receivedHeader;
     }
-
-    previous_packet_header = current_packet_header;
-    current_packet_header = *receivedHeader;
 
     /* Always reset RX pointer to start of slot so magic bytes are
      * overwritten by the first image data packet. */

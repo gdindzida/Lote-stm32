@@ -7,13 +7,15 @@
 extern "C" {
 #endif
 
+#define HISTOGRAM_SIZE ((SEARCH_SIZE * 2) + 1)
+#define TAU (0.05F) // seconds
+
 struct Corner {
   uint8_t row;
   uint8_t col;
   uint32_t score;
 };
 
-#define HISTOGRAM_SIZE ((SEARCH_SIZE * 2) + 1)
 struct Histogram {
   uint8_t colOffsets[HISTOGRAM_SIZE];
   uint8_t rowOffsets[HISTOGRAM_SIZE];
@@ -25,7 +27,8 @@ struct HistogramUV {
   int N;
 };
 
-void process_data(Payload *payload, WorkPackageType work_package_type);
+void process_data(Payload *payload, WorkPackageType work_package_type,
+                  RecvPacketHeader packetHeader);
 
 #ifdef __cplusplus
 }

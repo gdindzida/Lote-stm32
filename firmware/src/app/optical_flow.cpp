@@ -8,6 +8,7 @@
 #include "system/sysmem.h"
 #include "usb/usbd_cdc_if.h"
 #include "usbd_def.h"
+#include <algorithm>
 #include <array>
 #include <assert.h>
 #include <cstdint>
@@ -186,19 +187,23 @@ HistogramUV findMax(Histogram &hist) {
 } // namespace
 
 extern "C" void process_data(Payload *payload,
-                             WorkPackageType work_package_type) {
+                             WorkPackageType work_package_type,
+                             RecvPacketHeader packetHeader) {
   uint32_t start_cycles = DWT_GetCycles();
 
   payload->header.magic = MAGIC;
   payload->header.length = 0;
 
+  static float vx_filt = 0.F;
+  static float vy_filt = 0.F;
+
   // Get pointer to the current buffer slot
-  volatile uint8_t *currbufferView = UserRxBufferFS;
+  uint8_t *currbufferView = UserRxBufferFS;
   if (work_package_type == PROCESS_RX_2) {
     currbufferView += APP_RX_BUFFER_SIZE;
   }
 
-  volatile uint8_t *prevbufferView = currbufferView + APP_RX_BUFFER_SIZE;
+  uint8_t *prevbufferView = currbufferView + APP_RX_BUFFER_SIZE;
   if (work_package_type == PROCESS_RX_2) {
     prevbufferView = UserRxBufferFS;
   }
@@ -219,20 +224,25 @@ extern "C" void process_data(Payload *payload,
 
   HistogramUV histUV = findMax(hist);
 
+  float vx_raw = std::clamp(-histUV.u * packetHeader.h /
+                                (packetHeader.fx * packetHeader.dt),
+                            -1.F, 1.F);
+  float vy_raw = std::clamp(-histUV.v * packetHeader.h /
+                                (packetHeader.fy * packetHeader.dt),
+                            -1.F, 1.F);
+
+  // Low pass filter
+  float alpha = packetHeader.dt / (packetHeader.dt + TAU);
+
+  vx_filt = (alpha * vx_raw) + ((1.F - alpha) * vx_filt);
+  vy_filt = (alpha * vy_raw) + ((1.F - alpha) * vy_filt);
+
   payload->metadata.sum_u = 0;
   payload->metadata.sum_v = 0;
 
   payload->metadata.num_points = histUV.N;
-  payload->metadata.vx =
-      MAX(MIN(-histUV.u * current_packet_header.h /
-                  (current_packet_header.fx * current_packet_header.dt),
-              1),
-          -1);
-  payload->metadata.vy =
-      MAX(MIN(-histUV.v * current_packet_header.h /
-                  (current_packet_header.fy * current_packet_header.dt),
-              1),
-          -1);
+  payload->metadata.vx = vx_filt;
+  payload->metadata.vy = vy_filt;
   payload->metadata.omega = 0;
 
   payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));

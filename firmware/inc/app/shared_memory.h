@@ -11,7 +11,6 @@ extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 extern volatile uint32_t rxBufferOffset;
 
-extern volatile RecvPacketHeader current_packet_header;
-extern volatile RecvPacketHeader previous_packet_header;
+extern volatile RecvPacketHeader currentPacketHeader;
 
 #endif
