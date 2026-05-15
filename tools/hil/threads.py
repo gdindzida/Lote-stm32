@@ -324,7 +324,7 @@ def reader_thread_fn(
         coords: List[Coordinate] = []
         for i in range(NUM_COORDS):
             offset = meta_size + i * coord_size
-            u, v, valid = struct.unpack(
+            v, u, valid = struct.unpack(
                 COORD_FMT, payload[offset : offset + coord_size]
             )
             coords.append(Coordinate(u=u, v=v, valid=bool(valid)))

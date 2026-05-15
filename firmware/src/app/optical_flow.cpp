@@ -68,25 +68,25 @@ void process_stride(volatile const uint8_t *curr_img_stride,
         static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * blockIndex)),
         false};
 
-    // int psum = 0;
-    // int psum2 = 0;
-    // for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
-    //   for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-    //     int current_val = static_cast<int>(prev_img_stride[coord_to_index(
-    //         current_start.row + row, current_start.col + col, IMG_W)]);
-    //     psum += current_val;
-    //     psum2 += current_val * current_val;
-    //   }
-    // }
-    // float mean = static_cast<float>(psum) / 64;
-    // float variance = (static_cast<float>(psum2) / 64) - (mean * mean);
+    int psum = 0;
+    int psum2 = 0;
+    for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
+      for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
+        int current_val = static_cast<int>(prev_img_stride[coord_to_index(
+            current_start.row + row, current_start.col + col, IMG_W)]);
+        psum += current_val;
+        psum2 += current_val * current_val;
+      }
+    }
+    float mean = static_cast<float>(psum) / 64;
+    float variance = (static_cast<float>(psum2) / 64) - (mean * mean);
 
     payload->coordinates[index] = {rowOffset, colOffset, false};
 
-    // if (variance < VAR_MIN) {
-    //   index++;
-    //   continue;
-    // }
+    if (variance < VAR_MIN) {
+      index++;
+      continue;
+    }
 
     for (const Coordinate &search_index : search_indices) {
       int sad = 0;
@@ -149,11 +149,11 @@ HistogramUV findMax(Histogram &hist) {
     N += hist.rowOffsets[histIndex];
   }
 
-  int histMinColIndex = MAX(maxIndexCol - 0, 0);
-  int histMaxColIndex = MIN(maxIndexCol + 0, HISTOGRAM_SIZE - 1);
+  int histMinColIndex = MAX(maxIndexCol - 1, 0);
+  int histMaxColIndex = MIN(maxIndexCol + 1, HISTOGRAM_SIZE - 1);
 
-  int histMinRowIndex = MAX(maxIndexRow - 0, 0);
-  int histMaxRowIndex = MIN(maxIndexRow + 0, HISTOGRAM_SIZE - 1);
+  int histMinRowIndex = MAX(maxIndexRow - 1, 0);
+  int histMaxRowIndex = MIN(maxIndexRow + 1, HISTOGRAM_SIZE - 1);
 
   float sumU = 0.F;
   uint8_t nU = 0;
