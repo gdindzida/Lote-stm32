@@ -2,7 +2,7 @@ import struct
 import queue
 import threading
 import time
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 import serial
 from hil.csv_dataset import CsvDatasetStreamer
 from hil.frames import FrameItem, FrameReadEvent, FrameWriteEvent
@@ -62,9 +62,9 @@ def writer_thread_fn(
     period = (1.0 / write_freq_hz) if write_freq_hz is not None else 0.0
 
     # --- First frame (sent before the main loop) ---
-    image = streamer.next()
+    image, entry = streamer.next()
 
-    if image is None:
+    if image is None or entry is None:
         print("Left image is None!")
         error_event.set()
         return
@@ -73,8 +73,6 @@ def writer_thread_fn(
 
     print("Image shape: ", image.shape)
     img_data = image.tobytes()
-
-    entry: Dict[str, Any] = streamer.entries[0]  # type: ignore
 
     # print(
     #     "debug: Packet header contains: ",
@@ -126,9 +124,9 @@ def writer_thread_fn(
 
     # --- Subsequent frames ---
     while streamer.has_next() and not stop_event.is_set():
-        image = streamer.next()
+        image, entry = streamer.next()
 
-        if image is None:
+        if image is None or entry is None:
             print("Image is None!")
             continue
         frame_number += 1
@@ -189,9 +187,6 @@ def writer_thread_fn(
         # Pad to PACKET_SIZE to ensure separate USB packet
         sync_pkt = packet_header.ljust(PACKET_SIZE, b"\x00")
 
-        # Compute deadline for this frame:
-        # - If dataset timestamps available: use relative time from dataset
-        # - Otherwise: use fixed-frequency timing with absolute deadlines
         if use_dataset_timestamps:
             deadline = frame_write_time + dt
             sleep_time = deadline - time.time()
@@ -228,7 +223,15 @@ def writer_thread_fn(
 
         frame_writes.append(FrameWriteEvent(frame_write_time, deadline, False))
 
-        frame_queue.put(FrameItem(image.copy(), frame_number))
+        frame_queue.put(
+            FrameItem(
+                image.copy(),
+                frame_number,
+                dt,
+                float(entry.get("p_x", 0.0)),
+                float(entry.get("p_y", 0.0)),
+            )
+        )
 
     # Signal the reader that no more frames will be written (None = sentinel)
     frame_queue.put(None)
@@ -330,5 +333,15 @@ def reader_thread_fn(
             coords.append(Coordinate(u=u, v=v, valid=bool(valid)))
 
         frame_reads.append(
-            FrameReadEvent(read_time, image, payload, item.frame_number, meta, coords)
+            FrameReadEvent(
+                read_time=read_time,
+                image=image,
+                payload=payload,
+                frame_number=item.frame_number,
+                meta=meta,
+                dt=item.dt,
+                px=item.px,
+                py=item.py,
+                coords=coords,
+            )
         )

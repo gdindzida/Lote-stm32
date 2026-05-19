@@ -98,10 +98,9 @@ def plot_frame_metrics(
 def plot_velocities(
     vx: np.ndarray,
     vy: np.ndarray,
-    omega: np.ndarray,
+    helper_var: np.ndarray,
     vx_gt: np.ndarray,
     vy_gt: np.ndarray,
-    omega_gt: np.ndarray,
 ) -> None:
     """
     Plot estimated vs ground-truth velocities in 3 side-by-side subplots.
@@ -112,122 +111,20 @@ def plot_velocities(
     specs = [
         (axes[0], vx, vx_gt, "vx", "m/s"),
         (axes[1], vy, vy_gt, "vy", "m/s"),
-        (axes[2], omega, omega_gt, "omega", "rad/s"),
+        (axes[2], helper_var, None, "helper", ""),
     ]
 
     for ax, est, gt, title, unit in specs:
         ax.plot(est, color="#4C9BE8", linewidth=1.5, label="estimated")
-        ax.plot(
-            gt, color="#E84C4C", linewidth=1.5, label="ground truth", linestyle="--"
-        )
+        if gt is not None:
+            ax.plot(
+                gt, color="#E84C4C", linewidth=1.5, label="ground truth", linestyle="--"
+            )
         ax.set_title(title)
         ax.set_xlabel("Frame index")
         ax.set_ylabel(unit)
         ax.legend(fontsize=8)
         ax.grid(True, linestyle="--", alpha=0.4)
 
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_velocity_xy(
-    frame_numbers: List[int],
-    vx_kf: "np.ndarray",
-    vy_kf: "np.ndarray",
-    vx_gt: "np.ndarray",
-    vy_gt: "np.ndarray",
-) -> None:
-    """Plot Kalman-filtered velocity estimates vs. ground-truth velocity.
-
-    Two vertically-stacked subplots share the same x-axis (frame index):
-
-    * **Top**    — vx (East / horizontal velocity, m/frame).
-    * **Bottom** — vy (North / vertical velocity, m/frame).
-
-    Each panel shows:
-
-    * Solid line  — KF velocity estimate.
-    * Dashed grey — Ground-truth velocity (NaN entries silently omitted).
-
-    A summary MAE for each axis is annotated in the figure title.
-
-    Args:
-        frame_numbers: Dataset frame indices used as the x-axis.
-        vx_kf, vy_kf: Kalman-filtered velocity estimates in m/frame.
-        vx_gt, vy_gt: Ground-truth velocity in m/frame (may contain NaN).
-    """
-    try:
-        import matplotlib.pyplot as plt
-        import numpy as np
-    except ImportError:
-        print(
-            "matplotlib and numpy are required for --plot-kpi.  "
-            "Install with: pip install matplotlib numpy"
-        )
-        return
-
-    if not frame_numbers:
-        print("Not enough data for velocity plot (no frames recorded).")
-        return
-
-    _KF_VX_COLOR = "steelblue"
-    _KF_VY_COLOR = "tomato"
-    _GT_COLOR = "dimgrey"
-
-    fig, (ax_vx, ax_vy) = plt.subplots(
-        2, 1, figsize=(max(12, len(frame_numbers) * 0.25), 8), sharex=True
-    )
-
-    _PRED_STYLE = dict(linewidth=1.4, marker="o", markersize=3, zorder=3)
-    _GT_STYLE = dict(
-        linewidth=1.2,
-        linestyle="--",
-        marker="x",
-        markersize=4,
-        color=_GT_COLOR,
-        zorder=2,
-    )
-
-    # --- Valid GT mask (non-NaN entries) ---
-    valid_mask = ~np.isnan(vx_gt)
-    gt_frames = [frame_numbers[i] for i in range(len(frame_numbers)) if valid_mask[i]]
-    gt_vx = vx_gt[valid_mask]
-    gt_vy = vy_gt[valid_mask]
-
-    # ---- vx (East) ----
-    ax_vx.plot(
-        frame_numbers, vx_kf, color=_KF_VX_COLOR, label="vx KF estimate", **_PRED_STYLE
-    )
-    if gt_frames:
-        ax_vx.plot(gt_frames, gt_vx, label="vx ground truth", **_GT_STYLE)
-    ax_vx.set_ylabel("vx (m/frame)")
-    ax_vx.set_title("East velocity (vx) — KF estimate vs. ground truth")
-    ax_vx.legend(loc="upper right")
-    ax_vx.grid(True, linestyle=":", alpha=0.5)
-
-    # ---- vy (North) ----
-    ax_vy.plot(
-        frame_numbers, vy_kf, color=_KF_VY_COLOR, label="vy KF estimate", **_PRED_STYLE
-    )
-    if gt_frames:
-        ax_vy.plot(gt_frames, gt_vy, label="vy ground truth", **_GT_STYLE)
-    ax_vy.set_ylabel("vy (m/frame)")
-    ax_vy.set_xlabel("Frame index")
-    ax_vy.set_title("North velocity (vy) — KF estimate vs. ground truth")
-    ax_vy.legend(loc="upper right")
-    ax_vy.grid(True, linestyle=":", alpha=0.5)
-
-    # Annotate summary MAE in the suptitle (only when GT is available).
-    if len(gt_frames) > 0:
-        vx_mae = float(np.mean(np.abs(vx_kf[valid_mask] - gt_vx)))
-        vy_mae = float(np.mean(np.abs(vy_kf[valid_mask] - gt_vy)))
-        title = (
-            "Kalman Filter Velocity Estimate vs. Ground Truth  "
-            f"[vx MAE = {vx_mae:.4f} m/frame | vy MAE = {vy_mae:.4f} m/frame]"
-        )
-    else:
-        title = "Kalman Filter Velocity Estimate vs. Ground Truth"
-
-    fig.suptitle(title, fontsize=12, fontweight="bold")
     plt.tight_layout()
     plt.show()

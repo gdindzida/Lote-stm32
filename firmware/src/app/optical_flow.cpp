@@ -10,7 +10,6 @@
 #include "usbd_def.h"
 #include <algorithm>
 #include <array>
-#include <assert.h>
 #include <cstdint>
 #include <cstdlib>
 
@@ -41,10 +40,10 @@ constexpr auto search_indices = make_search_indices();
 
 inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
   // debug values
-  assert((row + currentOffset) < maxRow);
-  assert((row + currentOffset) >= minRow);
-  assert(col < maxCol);
-  assert(col >= minCol);
+  // assert((row + currentOffset) < maxRow);
+  // assert((row + currentOffset) >= minRow);
+  // assert(col < maxCol);
+  // assert(col >= minCol);
 
   return (row * width) + col;
 }
@@ -178,10 +177,49 @@ HistogramUV findMax(Histogram &hist) {
   }
 
   if (nU > 0 && nV > 0) {
-    return {sumU / static_cast<float>(nU), sumV / static_cast<float>(nV), N};
+    return {sumU / static_cast<float>(nU), sumV / static_cast<float>(nV), N,
+            static_cast<float>(nU * nV) / static_cast<float>(N * N)};
   }
 
-  return {0, 0, 0};
+  return {0, 0, 0, 0.F};
+}
+
+void predict(LinearKalmanFilter &lkf, float ax, float ay, float dt) {
+  // State prediction
+  lkf.vx += ax * dt;
+  lkf.vy += ay * dt;
+
+  // Covariance prediction
+  lkf.P00 += lkf.Q;
+  lkf.P11 += lkf.Q;
+}
+
+void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
+            float quality) {
+  quality = std::clamp(quality, 0.0F, 1.0F);
+
+  // Adaptive measurement noise
+  float R = 0.01F + ((1.0F - quality) * 1.0F);
+
+  // Innovation
+  float ix = vx_meas - lkf.vx;
+  float iy = vy_meas - lkf.vy;
+
+  // Innovation covariance
+  float S00 = lkf.P00 + R;
+  float S11 = lkf.P11 + R;
+
+  // Kalman gain
+  float K00 = lkf.P00 / S00;
+  float K11 = lkf.P11 / S11;
+
+  // State update
+  lkf.vx += K00 * ix;
+  lkf.vy += K11 * iy;
+
+  // Covariance update
+  lkf.P00 *= (1.0F - K00);
+  lkf.P11 *= (1.0F - K11);
 }
 
 } // namespace
@@ -196,6 +234,8 @@ extern "C" void process_data(Payload *payload,
 
   static float vx_filt = 0.F;
   static float vy_filt = 0.F;
+  static float ax_filt = 0.F;
+  static float ay_filt = 0.F;
 
   // Get pointer to the current buffer slot
   uint8_t *currbufferView = UserRxBufferFS;
@@ -224,7 +264,14 @@ extern "C" void process_data(Payload *payload,
 
   HistogramUV histUV = findMax(hist);
 
-  float vx_raw = std::clamp(-histUV.u * packetHeader.h /
+  // // correcting for roll and pitch
+  // float uRot = -packetHeader.w_y * packetHeader.fx;
+  // float vRot = packetHeader.w_x * packetHeader.fy;
+
+  // histUV.u -= uRot;
+  // histUV.v -= vRot;
+
+  float vx_raw = std::clamp(histUV.u * packetHeader.h /
                                 (packetHeader.fx * packetHeader.dt),
                             -1.F, 1.F);
   float vy_raw = std::clamp(-histUV.v * packetHeader.h /
@@ -234,8 +281,18 @@ extern "C" void process_data(Payload *payload,
   // Low pass filter
   float alpha = packetHeader.dt / (packetHeader.dt + TAU);
 
-  vx_filt = (alpha * vx_raw) + ((1.F - alpha) * vx_filt);
-  vy_filt = (alpha * vy_raw) + ((1.F - alpha) * vy_filt);
+  // vx_filt = (alpha * vx_raw) + ((1.F - alpha) * vx_filt);
+  // vy_filt = (alpha * vy_raw) + ((1.F - alpha) * vy_filt);
+  ax_filt = (alpha * packetHeader.a_x) + ((1.F - alpha) * ax_filt);
+  ay_filt = (alpha * packetHeader.a_y) + ((1.F - alpha) * ay_filt);
+
+  // Kalman filter
+  static LinearKalmanFilter lkf = {0.F, 0.F, 1.F, 0.F, 0.F, 1.F, 0.05F};
+
+  predict(lkf, ax_filt, ay_filt, packetHeader.dt);
+  update(lkf, vx_raw, vy_raw, histUV.quality);
+  vx_filt = lkf.vx;
+  vy_filt = lkf.vy;
 
   payload->metadata.sum_u = 0;
   payload->metadata.sum_v = 0;
@@ -243,7 +300,7 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.num_points = histUV.N;
   payload->metadata.vx = vx_filt;
   payload->metadata.vy = vy_filt;
-  payload->metadata.omega = 0;
+  payload->metadata.omega += ax_filt * packetHeader.dt;
 
   payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
 

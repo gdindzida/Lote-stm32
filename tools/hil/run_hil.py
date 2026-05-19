@@ -262,21 +262,10 @@ if __name__ == "__main__":
 
     do_kpi = args.kpi or args.plot_kpi
     if do_kpi:
-        # KPI computation requires valid data_root and sensors_root
-        if data_root is None:
-            print("KPI requested but --data-root not provided — skipping.")
-        else:
-            # Derive sensors_root from data_root when not supplied.
-            sensors_root: str = args.sensors_root or data_root.replace(
-                "_nav_cam", "_sensors"
-            )
-            compute_and_print_kpi(
-                frame_reads=frame_reads,
-                data_root=data_root,
-                sensors_root=sensors_root,
-                plot_kpi=args.plot_kpi,
-                start_frame=args.start_frame,
-            )
+        compute_and_print_kpi(
+            frame_reads=frame_reads,
+            plot_kpi=args.plot_kpi,
+        )
 
     if args.playback is not None or args.playback_realtime:
         playback_recorded_frames(

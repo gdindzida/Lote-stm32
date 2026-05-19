@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import csv
 import os
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Tuple
 
 import cv2
 import numpy as np
@@ -60,7 +60,6 @@ class CsvDatasetStreamer:
         if not os.path.isfile(self.dataset_csv_path):
             raise FileNotFoundError(f"Dataset CSV not found: {self.dataset_csv_path}")
 
-        # Load dataset entries
         self.entries: List[Dict[str, Any]] = self.load_dataset()
 
         if not self.entries:
@@ -69,7 +68,7 @@ class CsvDatasetStreamer:
             )
 
         n_entries = len(self.entries)
-        start_index: int = max(0, min(start_frame - 1, n_entries - 1))
+        start_index: int = max(0, min(start_frame, n_entries - 1))
         if start_index > 0:
             print(f"Skipping to frame {start_frame} (index {start_index})")
 
@@ -83,6 +82,7 @@ class CsvDatasetStreamer:
             f"Timestamp range: {timestamps[start_index]:.3f} → {timestamps[-1]:.3f} s"
         )
 
+        self._start_index: int = start_index
         self.index: int = start_index
         self.total: int = n_entries
         self.dataset_streamer_adapter: Any | None = dataset_streamer_adapter
@@ -162,7 +162,7 @@ class CsvDatasetStreamer:
 
     def next(
         self,
-    ) -> Optional[np.ndarray[Any, Any]]:
+    ) -> Tuple[Optional[np.ndarray[Any, Any]], Optional[Dict[str, Any]]]:
         """Return the grayscale image for the current frame.
 
         Both elements are the **same** grayscale image because we have a
@@ -172,7 +172,7 @@ class CsvDatasetStreamer:
         Returns ``None`` when the dataset is exhausted.
         """
         if not self.has_next():
-            return None
+            return None, None
 
         entry = self.entries[self.index]
         img: np.ndarray | None = cv2.imread(
@@ -184,24 +184,4 @@ class CsvDatasetStreamer:
 
         self.index += 1
         # Return same frame for both query and reference slots.
-        return img
-
-    def run(self) -> None:
-        """Run the full stream through the adapter (if set)."""
-        if self.dataset_streamer_adapter is None:
-            print("Error: Dataset streamer adapter is None.")
-            return
-
-        while self.has_next():
-            result = self.next()
-            if result is None:
-                print("Image is None!")
-                continue
-
-            query_img, reference_img = result
-
-            if query_img is None:
-                print("Query image is None!")
-                continue
-
-            self.dataset_streamer_adapter.process((query_img, reference_img))
+        return img, entry

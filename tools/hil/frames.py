@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional, Dict, Any
 
 import numpy as np
 
@@ -30,6 +30,9 @@ class FrameReadEvent:
     payload: bytes
     frame_number: int
     meta: Metadata
+    dt: float
+    px: float
+    py: float
     coords: List[Coordinate] = field(default_factory=lambda: [])
 
 
@@ -39,3 +42,6 @@ class FrameItem:
 
     image: np.ndarray
     frame_number: int
+    dt: float
+    px: float
+    py: float
