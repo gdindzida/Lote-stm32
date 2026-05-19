@@ -271,12 +271,12 @@ extern "C" void process_data(Payload *payload,
   // histUV.u -= uRot;
   // histUV.v -= vRot;
 
-  float vx_raw = std::clamp(histUV.u * packetHeader.h /
+  float vx_raw = std::clamp(-histUV.u * packetHeader.h /
                                 (packetHeader.fx * packetHeader.dt),
-                            -1.F, 1.F);
+                            -10.F, 10.F);
   float vy_raw = std::clamp(-histUV.v * packetHeader.h /
                                 (packetHeader.fy * packetHeader.dt),
-                            -1.F, 1.F);
+                            -10.F, 10.F);
 
   // Low pass filter
   float alpha = packetHeader.dt / (packetHeader.dt + TAU);
@@ -300,7 +300,7 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.num_points = histUV.N;
   payload->metadata.vx = vx_filt;
   payload->metadata.vy = vy_filt;
-  payload->metadata.omega += ax_filt * packetHeader.dt;
+  payload->metadata.omega = vx_raw;
 
   payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
 

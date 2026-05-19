@@ -15,7 +15,7 @@ RMSE  Root Mean Square Error
 from __future__ import annotations
 
 from typing import List
-
+import cv2
 from hil.frames import FrameReadEvent
 from hil.plot import plot_velocities
 
@@ -25,6 +25,35 @@ except ImportError as exc:
     raise ImportError(
         "numpy is required for KPI computation. Install it with: pip install numpy"
     ) from exc
+
+
+def optical_flow_farneback(
+    img1: np.ndarray, img2: np.ndarray
+) -> tuple[float, float, np.ndarray]:
+    """
+    Dense optical flow using Farneback method.
+    Computes flow for every pixel; returns average vx, vy.
+    """
+    # gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    # gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+
+    flow = cv2.calcOpticalFlowFarneback(
+        img1,
+        img2,
+        flow=None,
+        pyr_scale=0.5,  # image pyramid scale
+        levels=3,  # pyramid levels
+        winsize=15,  # averaging window size
+        iterations=3,  # iterations per pyramid level
+        poly_n=5,  # pixel neighborhood size
+        poly_sigma=1.2,  # Gaussian std for polynomial expansion
+        flags=0,
+    )
+    # flow shape: (H, W, 2) — [:,:,0] = vx, [:,:,1] = vy
+    avg_vx = float(np.mean(flow[:, :, 0]))
+    avg_vy = float(np.mean(flow[:, :, 1]))
+
+    return avg_vx, avg_vy, flow
 
 
 def compute_and_print_kpi(
@@ -62,13 +91,28 @@ def compute_and_print_kpi(
         vx_gt = np.zeros(len(frame_reads))
         vy_gt = np.zeros(len(frame_reads))
         for i, _ in enumerate(frame_reads):
-            if i != 0:
-                vx_gt[i] = (frame_reads[i].px - frame_reads[i - 1].px) / frame_reads[
-                    i
-                ].dt
-                vy_gt[i] = (frame_reads[i].py - frame_reads[i - 1].py) / frame_reads[
-                    i
-                ].dt
+            if (
+                i != 0
+                and frame_reads[i].dt != 0
+                and frame_reads[i].fx != 0
+                and frame_reads[i].fy != 0
+            ):
+                # vx_gt[i] = (frame_reads[i].px - frame_reads[i - 1].px) / frame_reads[
+                #     i
+                # ].dt
+                # vy_gt[i] = (frame_reads[i].py - frame_reads[i - 1].py) / frame_reads[
+                #     i
+                # ].dt
+                pvx, pvy, _ = optical_flow_farneback(
+                    frame_reads[i].image, frame_reads[i - 1].image
+                )
+
+                vx_gt[i] = (
+                    pvx * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fx)
+                )
+                vy_gt[i] = (
+                    pvy * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fy)
+                )
             else:
                 vx_gt[0] = 0
                 vy_gt[0] = 0

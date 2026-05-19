@@ -230,6 +230,9 @@ def writer_thread_fn(
                 dt,
                 float(entry.get("p_x", 0.0)),
                 float(entry.get("p_y", 0.0)),
+                float(entry.get("p_z", 0.0)),
+                float(calibration["fx"]),
+                float(calibration["fy"]),
             )
         )
 
@@ -342,6 +345,9 @@ def reader_thread_fn(
                 dt=item.dt,
                 px=item.px,
                 py=item.py,
+                pz=item.pz,
+                fx=item.fx,
+                fy=item.fy,
                 coords=coords,
             )
         )

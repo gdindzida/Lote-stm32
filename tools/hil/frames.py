@@ -33,6 +33,9 @@ class FrameReadEvent:
     dt: float
     px: float
     py: float
+    pz: float
+    fx: float
+    fy: float
     coords: List[Coordinate] = field(default_factory=lambda: [])
 
 
@@ -45,3 +48,6 @@ class FrameItem:
     dt: float
     px: float
     py: float
+    pz: float
+    fx: float
+    fy: float
