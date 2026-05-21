@@ -88,8 +88,10 @@ def compute_and_print_kpi(
         vy_pred = np.array([fr.meta.vy for fr in frame_reads], dtype=np.float64)
         debug_signal = np.array([fr.meta.debug for fr in frame_reads], dtype=np.float64)
 
-        vx_gt = np.zeros(len(frame_reads))
-        vy_gt = np.zeros(len(frame_reads))
+        vx_opencv = np.zeros(len(frame_reads))
+        vy_opencv = np.zeros(len(frame_reads))
+        vx_pos = np.zeros(len(frame_reads))
+        vy_pos = np.zeros(len(frame_reads))
         for i, _ in enumerate(frame_reads):
             if (
                 i != 0
@@ -97,47 +99,51 @@ def compute_and_print_kpi(
                 and frame_reads[i].fx != 0
                 and frame_reads[i].fy != 0
             ):
-                # vx_gt[i] = (frame_reads[i].px - frame_reads[i - 1].px) / frame_reads[
-                #     i
-                # ].dt
-                # vy_gt[i] = (frame_reads[i].py - frame_reads[i - 1].py) / frame_reads[
-                #     i
-                # ].dt
+                # ── position-derived velocity (Δpos / Δt) ────────────────────
+                vx_pos[i] = (frame_reads[i].px - frame_reads[i - 1].px) / frame_reads[
+                    i
+                ].dt
+                vy_pos[i] = (frame_reads[i].py - frame_reads[i - 1].py) / frame_reads[
+                    i
+                ].dt
+
+                # ── OpenCV Farneback optical-flow velocity ────────────────────
                 pvx, pvy, _ = optical_flow_farneback(
                     frame_reads[i].image, frame_reads[i - 1].image
                 )
-
-                vx_gt[i] = (
+                vx_opencv[i] = (
                     pvx * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fx)
                 )
-                vy_gt[i] = (
+                vy_opencv[i] = (
                     pvy * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fy)
                 )
             else:
-                vx_gt[0] = 0
-                vy_gt[0] = 0
+                vx_opencv[0] = 0.0
+                vy_opencv[0] = 0.0
+                vx_pos[0] = 0.0
+                vy_pos[0] = 0.0
 
         # omega_gt = np.array(
         #     [fr.ground_truth.omega for fr in frames_with_gt], dtype=np.float64  # type: ignore[union-attr]
         # )
 
-        # Only use frames where GT velocity is valid (non-NaN)
-        valid_mask = ~np.isnan(vx_gt)
+        # Only use frames where OpenCV GT velocity is valid (non-NaN)
+        valid_mask = ~np.isnan(vx_opencv)
         if not valid_mask.any():
             print("  All ground-truth velocities are NaN — skipping KPI.")
             return
 
-        vx_mae = float(np.mean(np.abs(vx_pred[valid_mask] - vx_gt[valid_mask])))
-        vy_mae = float(np.mean(np.abs(vy_pred[valid_mask] - vy_gt[valid_mask])))
+        vx_mae = float(np.mean(np.abs(vx_pred[valid_mask] - vx_opencv[valid_mask])))
+        vy_mae = float(np.mean(np.abs(vy_pred[valid_mask] - vy_opencv[valid_mask])))
         # omega_mae = float(
         #     np.mean(np.abs(omega_pred[valid_mask] - omega_gt[valid_mask]))
         # )
 
         vx_rmse = float(
-            np.sqrt(np.mean((vx_pred[valid_mask] - vx_gt[valid_mask]) ** 2))
+            np.sqrt(np.mean((vx_pred[valid_mask] - vx_opencv[valid_mask]) ** 2))
         )
         vy_rmse = float(
-            np.sqrt(np.mean((vy_pred[valid_mask] - vy_gt[valid_mask]) ** 2))
+            np.sqrt(np.mean((vy_pred[valid_mask] - vy_opencv[valid_mask]) ** 2))
         )
         # omega_rmse = float(
         #     np.sqrt(np.mean((omega_pred[valid_mask] - omega_gt[valid_mask]) ** 2))
@@ -148,7 +154,9 @@ def compute_and_print_kpi(
 
         if plot_kpi:
             print(f"Plotting velocities!")
-            plot_velocities(vx_pred, vy_pred, debug_signal, vx_gt, vy_gt)
+            plot_velocities(
+                vx_pred, vy_pred, debug_signal, vx_opencv, vy_opencv, vx_pos, vy_pos
+            )
 
     except Exception as exc:
         print(f"KPI computation failed: {exc}")
