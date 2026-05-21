@@ -103,18 +103,28 @@ def plot_velocities(
     vy_gt: np.ndarray,
 ) -> None:
     """
-    Plot estimated vs ground-truth velocities in 3 side-by-side subplots.
+    Plot estimated vs ground-truth velocities in 3 side-by-side subplots (top row),
+    with error (predicted − GT) for vx and vy in a second row below them.
     """
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    fig = plt.figure(figsize=(15, 8))
     fig.suptitle("Velocity estimates vs ground truth", fontsize=14, fontweight="bold")
 
-    specs = [
-        (axes[0], vx, vx_gt, "vx", "m/s"),
-        (axes[1], vy, vy_gt, "vy", "m/s"),
-        (axes[2], helper_var, None, "helper", ""),
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.45)
+
+    ax_vx = fig.add_subplot(gs[0, 0])
+    ax_vy = fig.add_subplot(gs[0, 1])
+    ax_helper = fig.add_subplot(gs[0, 2])
+    ax_vx_err = fig.add_subplot(gs[1, 0])
+    ax_vy_err = fig.add_subplot(gs[1, 1])
+
+    # ── top row: velocity traces ──────────────────────────────────────────────
+    vel_specs = [
+        (ax_vx, vx, vx_gt, "vx", "m/s"),
+        (ax_vy, vy, vy_gt, "vy", "m/s"),
+        (ax_helper, helper_var, None, "helper", ""),
     ]
 
-    for ax, est, gt, title, unit in specs:
+    for ax, est, gt, title, unit in vel_specs:
         ax.plot(est, color="#4C9BE8", linewidth=1.5, label="estimated")
         if gt is not None:
             ax.plot(
@@ -124,6 +134,20 @@ def plot_velocities(
         ax.set_xlabel("Frame index")
         ax.set_ylabel(unit)
         ax.legend(fontsize=8)
+        ax.grid(True, linestyle="--", alpha=0.4)
+
+    # ── bottom row: prediction error traces ───────────────────────────────────
+    err_specs = [
+        (ax_vx_err, vx - vx_gt, "vx error (pred − GT)"),
+        (ax_vy_err, vy - vy_gt, "vy error (pred − GT)"),
+    ]
+
+    for ax, err, title in err_specs:
+        ax.plot(err, color="#E8A84C", linewidth=1.5)
+        ax.axhline(0, color="white", linewidth=0.8, linestyle="--", alpha=0.6)
+        ax.set_title(title)
+        ax.set_xlabel("Frame index")
+        ax.set_ylabel("m/s")
         ax.grid(True, linestyle="--", alpha=0.4)
 
     plt.tight_layout()

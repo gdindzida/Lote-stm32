@@ -2,85 +2,53 @@ import cv2
 import yaml
 import os
 import argparse
-from typing import Dict
+import numpy as np
 
 
-def load_camchain(yaml_path: str) -> Dict[str, float]:
-    """Load camera calibration parameters from camchain.yaml.
-
-    Args:
-        yaml_path: Path to camchain.yaml file
-
-    Returns:
-        Dictionary with keys: fx, fy, cx, cy, k1, k2
-
-    Raises:
-        FileNotFoundError: If yaml_path doesn't exist
-        KeyError: If required fields are missing in YAML
-        ValueError: If calibration data format is invalid
-
-    Example camchain.yaml format:
-        cam0:
-          intrinsics: [fx, fy, cx, cy]
-          distortion_coeffs: [k1, k2, p1, p2]
-          distortion_model: radtan
-    """
-    with open(yaml_path, "r") as f:
+def load_camchain(camchain_path):
+    with open(camchain_path, "r") as f:
         data = yaml.safe_load(f)
-
-    if "cam0" not in data:
-        raise KeyError("camchain.yaml must contain 'cam0' key")
 
     cam = data["cam0"]
 
-    # Extract intrinsics: [fx, fy, cx, cy]
-    if "intrinsics" not in cam:
-        raise KeyError("cam0 must contain 'intrinsics' field")
+    K = np.array(
+        [
+            [cam["intrinsics"][0], 0, cam["intrinsics"][2]],
+            [0, cam["intrinsics"][1], cam["intrinsics"][3]],
+            [0, 0, 1],
+        ],
+        dtype=np.float32,
+    )
 
-    intrinsics = cam["intrinsics"]
-    if len(intrinsics) < 4:
-        raise ValueError(
-            f"intrinsics must have at least 4 values, got {len(intrinsics)}"
-        )
+    D = np.array(cam["distortion_coeffs"], dtype=np.float32)
 
-    # Extract distortion coefficients: [k1, k2, ...]
-    if "distortion_coeffs" not in cam:
-        raise KeyError("cam0 must contain 'distortion_coeffs' field")
-
-    distortion = cam["distortion_coeffs"]
-    if len(distortion) < 2:
-        raise ValueError(
-            f"distortion_coeffs must have at least 2 values, got {len(distortion)}"
-        )
-
-    calibration = {
-        "fx": float(intrinsics[0]) * 96 / 2056,
-        "fy": float(intrinsics[1]) * 96 / 1542,
-        "cx": float(intrinsics[2]),
-        "cy": float(intrinsics[3]),
-        "k1": float(distortion[0]),
-        "k2": float(distortion[1]),
-    }
-
-    return calibration
+    return K, D
 
 
-def center_crop(img, crop_size):
+def center_crop(img: np.ndarray, crop_w: int, crop_h: int) -> np.ndarray:
     h, w = img.shape[:2]
     cx, cy = w // 2, h // 2
 
-    half = crop_size // 2
+    half_w = crop_w // 2
+    half_h = crop_h // 2
 
-    x1 = max(cx - half, 0)
-    y1 = max(cy - half, 0)
+    x1 = max(cx - half_w, 0)
+    y1 = max(cy - half_h, 0)
 
-    x2 = x1 + crop_size
-    y2 = y1 + crop_size
+    x2 = x1 + crop_w
+    y2 = y1 + crop_h
 
     return img[y1:y2, x1:x2]
 
 
-def process(input_dir, output_dir, K, D, crop_size=256, out_size=96):
+def process(
+    input_dir: str,
+    output_dir: str,
+    K: np.ndarray,
+    D: np.ndarray,
+    crop_size: tuple[int, int] = (256, 256),
+    out_size: tuple[int, int] = (96, 96),
+) -> None:
     os.makedirs(output_dir, exist_ok=True)
 
     # get sample image
@@ -114,11 +82,13 @@ def process(input_dir, output_dir, K, D, crop_size=256, out_size=96):
         # 2. grayscale
         gray = cv2.cvtColor(rect, cv2.COLOR_BGR2GRAY)
 
-        # 3. center crop (256 or 512)
-        cropped = center_crop(gray, crop_size)
+        # 3. center crop
+        cropped = center_crop(gray, crop_size[0], crop_size[1])
 
-        # 4. resize to 96x96
-        small = cv2.resize(cropped, (out_size, out_size), interpolation=cv2.INTER_AREA)
+        # 4. resize to out_size
+        small = cv2.resize(
+            cropped, (out_size[0], out_size[1]), interpolation=cv2.INTER_AREA
+        )
 
         out_path = os.path.join(output_dir, fname)
         cv2.imwrite(out_path, small)
@@ -134,18 +104,35 @@ def main():
     parser.add_argument("--camchain", required=True)
 
     parser.add_argument(
-        "--crop", type=int, default=256, help="crop size: 256 or 512 recommended"
+        "--crop",
+        type=int,
+        nargs=2,
+        default=[256, 256],
+        metavar=("W", "H"),
+        help="crop size as width and height (e.g. --crop 256 256)",
     )
 
-    parser.add_argument("--size", type=int, default=96, help="final output size")
+    parser.add_argument(
+        "--size",
+        type=int,
+        nargs=2,
+        default=[96, 96],
+        metavar=("W", "H"),
+        help="final output size as width and height (e.g. --size 96 96)",
+    )
 
     args = parser.parse_args()
 
     K, D = load_camchain(args.camchain)
 
-    print("Using crop:", args.crop, "→ output:", args.size)
+    crop_size = tuple(args.crop)
+    out_size = tuple(args.size)
 
-    process(args.input, args.output, K, D, args.crop, args.size)
+    print(
+        f"Using crop: {crop_size[0]}x{crop_size[1]} → output: {out_size[0]}x{out_size[1]}"
+    )
+
+    process(args.input, args.output, K, D, crop_size, out_size)
 
 
 if __name__ == "__main__":
