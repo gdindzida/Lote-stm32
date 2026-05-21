@@ -15,13 +15,13 @@
 
 // app memory
 volatile WorkPackageType currentWorkType = NO_WORK;
-uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+uint8_t rxBuffer[APP_RX_DATA_SIZE];
+uint8_t txBuffer[APP_TX_DATA_SIZE];
 volatile uint32_t rxBufferOffset = 0;
 
 volatile RecvPacketHeader currentPacketHeader = {0};
 
-static Payload payload = {};
+static Payload payload = {0};
 
 /**
  * @brief  The application entry point.
@@ -51,12 +51,12 @@ int main(void) {
     __enable_irq();
 
     if (workPackageType != NO_WORK) {
-      int16_t length = 0;
+      uint16_t length = 0;
       if (isFirst == false) {
         process_data(&payload, workPackageType, localPacketHeader);
         length = sizeof(Payload);
-        memcpy(UserTxBufferFS, &payload, length);
-        CDC_Transmit_FS(UserTxBufferFS, length);
+        memcpy(txBuffer, &payload, length);
+        CDC_Transmit_FS(txBuffer, length);
       } else {
         isFirst = false;
       }

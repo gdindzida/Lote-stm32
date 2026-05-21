@@ -6,12 +6,10 @@
 
 // extern
 extern USBD_HandleTypeDef hUsbDeviceFS;
-
 extern volatile WorkPackageType currentWorkType;
-extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+extern uint8_t rxBuffer[APP_RX_DATA_SIZE];
+extern uint8_t txBuffer[APP_TX_DATA_SIZE];
 extern volatile uint32_t rxBufferOffset;
-
 extern volatile RecvPacketHeader currentPacketHeader;
 
 // local
@@ -34,16 +32,16 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS = {CDC_Init_FS, CDC_DeInit_FS,
  * @retval USBD_OK if all operations are OK else USBD_FAIL
  */
 static int8_t CDC_Init_FS(void) {
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
-  return (USBD_OK);
+  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, txBuffer, 0);
+  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rxBuffer);
+  return USBD_OK;
 }
 
 /**
  * @brief  DeInitializes the CDC media low layer
  * @retval USBD_OK if all operations are OK else USBD_FAIL
  */
-static int8_t CDC_DeInit_FS(void) { return (USBD_OK); }
+static int8_t CDC_DeInit_FS(void) { return USBD_OK; }
 
 /**
  * @brief  Manage the CDC class requests
@@ -113,7 +111,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length) {
     break;
   }
 
-  return (USBD_OK);
+  return USBD_OK;
 }
 
 /**
@@ -137,7 +135,7 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
 
   case RX_WAIT_FOR_MAGIC: {
     RecvPacketHeader *receivedHeader =
-        (RecvPacketHeader *)(UserRxBufferFS + rxBufferOffset);
+        (RecvPacketHeader *)(rxBuffer + rxBufferOffset);
     if (receivedHeader->magic == MAGIC) {
       rxBytesReceived = 0;
       rxState = RX_RECEIVING_DATA;
@@ -146,7 +144,7 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
 
     /* Always reset RX pointer to start of slot so magic bytes are
      * overwritten by the first image data packet. */
-    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rxBuffer + rxBufferOffset);
     break;
   }
 
@@ -164,7 +162,7 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
       }
 
       rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
-      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS + rxBufferOffset);
+      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rxBuffer + rxBufferOffset);
     } else {
       USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf + *Len);
     }

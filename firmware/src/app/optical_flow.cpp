@@ -3,10 +3,7 @@
 #include "app/image.h"
 #include "app/shared_memory.h"
 #include "bsp/dwt.h"
-#include "stm32g4xx_hal.h"
-#include "stm32g4xx_hal_def.h"
 #include "system/sysmem.h"
-#include "usb/usbd_cdc_if.h"
 #include "usbd_def.h"
 #include <algorithm>
 #include <array>
@@ -14,13 +11,6 @@
 #include <cstdlib>
 
 namespace {
-
-// debug values
-int32_t currentOffset;
-int32_t maxCol;
-int32_t maxRow;
-int32_t minCol;
-int32_t minRow;
 
 constexpr std::array<Coordinate, (SEARCH_SIZE * 2 + 1) * (SEARCH_SIZE * 2 + 1)>
 make_search_indices() {
@@ -39,29 +29,21 @@ make_search_indices() {
 constexpr auto search_indices = make_search_indices();
 
 inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
-  // debug values
-  // assert((row + currentOffset) < maxRow);
-  // assert((row + currentOffset) >= minRow);
-  // assert(col < maxCol);
-  // assert(col >= minCol);
 
   return (row * width) + col;
 }
 
-void process_stride(volatile const uint8_t *curr_img_stride,
-                    volatile const uint8_t *prev_img_stride, Histogram &hist,
+void process_stride(const uint8_t *curr_img_stride,
+                    const uint8_t *prev_img_stride, Histogram &hist,
                     Payload *payload, int32_t &index) {
 
   for (int blockIndex = 0; blockIndex < NUMBER_OF_BLOCKS_PER_STRIDE;
        ++blockIndex) {
-    // debug values
-    minCol = blockIndex * SAD_BLOCK_SIZE;
-    maxCol = (blockIndex + 2) * SAD_BLOCK_SIZE;
 
-    volatile int min_sad = SAD_MAX;
+    int min_sad = SAD_MAX;
 
-    volatile int16_t colOffset = 0;
-    volatile int16_t rowOffset = 0;
+    int16_t colOffset = 0;
+    int16_t rowOffset = 0;
 
     Coordinate current_start = {
         static_cast<int16_t>(SEARCH_SIZE),
@@ -78,8 +60,10 @@ void process_stride(volatile const uint8_t *curr_img_stride,
         psum2 += current_val * current_val;
       }
     }
-    float mean = static_cast<float>(psum) / 64;
-    float variance = (static_cast<float>(psum2) / 64) - (mean * mean);
+    float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
+    float variance =
+        (static_cast<float>(psum2) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE)) -
+        (mean * mean);
 
     payload->coordinates[index] = {rowOffset, colOffset, false};
 
@@ -101,12 +85,8 @@ void process_stride(volatile const uint8_t *curr_img_stride,
           int candidate_val = static_cast<int>(curr_img_stride[coord_to_index(
               candidate_start.row + row, candidate_start.col + col, IMG_W)]);
 
-          int diff = candidate_val - current_val;
-          if (diff < 0) {
-            diff *= -1;
-          }
-
-          sad += diff;
+          const int diff = candidate_val - current_val;
+          sad += diff < 0 ? -diff : diff;
         }
       }
 
@@ -238,25 +218,17 @@ extern "C" void process_data(Payload *payload,
   static float ay_filt = 0.F;
 
   // Get pointer to the current buffer slot
-  uint8_t *currbufferView = UserRxBufferFS;
+  uint8_t *currbufferView = rxBuffer;
+  uint8_t *prevbufferView = rxBuffer + APP_RX_BUFFER_SIZE;
   if (work_package_type == PROCESS_RX_2) {
-    currbufferView += APP_RX_BUFFER_SIZE;
-  }
-
-  uint8_t *prevbufferView = currbufferView + APP_RX_BUFFER_SIZE;
-  if (work_package_type == PROCESS_RX_2) {
-    prevbufferView = UserRxBufferFS;
+    currbufferView = rxBuffer + APP_RX_BUFFER_SIZE;
+    prevbufferView = rxBuffer;
   }
 
   Histogram hist{};
 
   int32_t coordIndex = 0;
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
-    // debug values
-    maxRow = SAD_BLOCK_SIZE * (strideIndex + 2);
-    minRow = SAD_BLOCK_SIZE * strideIndex;
-    currentOffset = SAD_BLOCK_SIZE * strideIndex;
-
     process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
                    prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
                    hist, payload, coordIndex);
@@ -302,7 +274,9 @@ extern "C" void process_data(Payload *payload,
   payload->metadata.vy = vy_filt;
   payload->metadata.omega = vx_raw;
 
-  payload->header.length = sizeof(Metadata) + (121 * sizeof(Coordinate));
+  payload->header.length =
+      sizeof(Metadata) +
+      (NUMBER_OF_STRIDES * NUMBER_OF_BLOCKS_PER_STRIDE * sizeof(Coordinate));
 
   uint32_t elapsed_cycles = DWT_GetCycles() - start_cycles;
   payload->metadata.elapsed_time_ms =

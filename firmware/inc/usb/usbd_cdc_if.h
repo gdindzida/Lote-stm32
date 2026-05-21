@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#include "app_types.h"
+#include "app/app_types.h"
 #include "usbd_cdc.h"
 
 extern USBD_CDC_ItfTypeDef USBD_Interface_fops_FS;
