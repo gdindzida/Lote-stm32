@@ -317,8 +317,7 @@ def reader_thread_fn(
         meta = Metadata(*meta_raw)
 
         print("Got this many valid points: ", meta.num_points)
-        print("u_sum: ", meta.u_sum, ", v_sum: ", meta.v_sum)
-        print("vx: ", meta.vx, ", vy: ", meta.vy, ", omega: ", meta.omega)
+        print("vx: ", meta.vx, ", vy: ", meta.vy, ", debug: ", meta.debug)
         print("Peak stack memory: ", meta.stack_mem_usage)
         print("Heap mem usage: ", meta.heap_mem_usage)
         print("")

@@ -8,8 +8,7 @@ from a HIL (Hardware-in-the-Loop) test run, including:
 - Missed frames statistics
 """
 
-import statistics
-from typing import List, Optional
+from typing import List
 from hil.frames import FrameWriteEvent, FrameReadEvent
 import numpy as np
 
@@ -45,6 +44,13 @@ def compute_and_print_metrics(
         ]
     )
 
+    stride_elapsed_ms = np.array(
+        [
+            r.meta.stride_elapsed_tim_ms  # already in ms per dataclass name
+            for r in paired_reads
+        ]
+    )
+
     def _print_stats(arr: np.ndarray) -> None:
         arr_mean = arr.mean()
         arr_max = arr.max()
@@ -62,6 +68,10 @@ def compute_and_print_metrics(
     print()
     print("Process elapsed time")
     _print_stats(process_elapsed_ms)
+
+    print()
+    print("Stride elapsed time")
+    _print_stats(stride_elapsed_ms)
 
     # --- Memory ---
     max_stack = max(r.meta.stack_mem_usage for r in paired_reads)

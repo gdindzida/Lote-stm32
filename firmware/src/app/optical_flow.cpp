@@ -207,15 +207,15 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
 extern "C" void process_data(Payload *payload,
                              WorkPackageType work_package_type,
                              RecvPacketHeader packetHeader) {
-  uint32_t start_cycles = DWT_GetCycles();
+  uint32_t startCycles = DWT_GetCycles();
 
   payload->header.magic = MAGIC;
   payload->header.length = 0;
 
-  static float vx_filt = 0.F;
-  static float vy_filt = 0.F;
-  static float ax_filt = 0.F;
-  static float ay_filt = 0.F;
+  static float vxFilt = 0.F;
+  static float vyFilt = 0.F;
+  static float axFilt = 0.F;
+  static float ayFilt = 0.F;
 
   // Get pointer to the current buffer slot
   uint8_t *currbufferView = rxBuffer;
@@ -233,6 +233,7 @@ extern "C" void process_data(Payload *payload,
                    prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
                    hist, payload, coordIndex);
   }
+  uint32_t elapsedStrideCycles = DWT_GetCycles() - startCycles;
 
   HistogramUV histUV = findMax(hist);
 
@@ -243,44 +244,44 @@ extern "C" void process_data(Payload *payload,
   // histUV.u -= uRot;
   // histUV.v -= vRot;
 
-  float vx_raw = std::clamp(-histUV.u * packetHeader.h /
-                                (packetHeader.fx * packetHeader.dt),
-                            -10.F, 10.F);
-  float vy_raw = std::clamp(-histUV.v * packetHeader.h /
-                                (packetHeader.fy * packetHeader.dt),
-                            -10.F, 10.F);
+  float vxRaw = std::clamp(-histUV.u * packetHeader.h /
+                               (packetHeader.fx * packetHeader.dt),
+                           -10.F, 10.F);
+  float vyRaw = std::clamp(-histUV.v * packetHeader.h /
+                               (packetHeader.fy * packetHeader.dt),
+                           -10.F, 10.F);
 
   // Low pass filter
   float alpha = packetHeader.dt / (packetHeader.dt + TAU);
 
-  // vx_filt = (alpha * vx_raw) + ((1.F - alpha) * vx_filt);
-  // vy_filt = (alpha * vy_raw) + ((1.F - alpha) * vy_filt);
-  ax_filt = (alpha * packetHeader.a_x) + ((1.F - alpha) * ax_filt);
-  ay_filt = (alpha * packetHeader.a_y) + ((1.F - alpha) * ay_filt);
+  // vxFilt = (alpha * vxRaw) + ((1.F - alpha) * vxFilt);
+  // vyFilt = (alpha * vyRaw) + ((1.F - alpha) * vyFilt);
+  axFilt = (alpha * packetHeader.ax) + ((1.F - alpha) * axFilt);
+  ayFilt = (alpha * packetHeader.ay) + ((1.F - alpha) * ayFilt);
 
   // Kalman filter
   static LinearKalmanFilter lkf = {0.F, 0.F, 1.F, 0.F, 0.F, 1.F, 0.05F};
 
-  predict(lkf, ax_filt, ay_filt, packetHeader.dt);
-  update(lkf, vx_raw, vy_raw, histUV.quality);
-  vx_filt = lkf.vx;
-  vy_filt = lkf.vy;
+  predict(lkf, axFilt, ayFilt, packetHeader.dt);
+  update(lkf, vxRaw, vyRaw, histUV.quality);
+  vxFilt = lkf.vx;
+  vyFilt = lkf.vy;
 
-  payload->metadata.sum_u = 0;
-  payload->metadata.sum_v = 0;
-
-  payload->metadata.num_points = histUV.N;
-  payload->metadata.vx = vx_filt;
-  payload->metadata.vy = vy_filt;
-  payload->metadata.omega = vx_raw;
+  payload->metadata.numPoints = histUV.N;
+  payload->metadata.vx = vxFilt;
+  payload->metadata.vy = vyFilt;
+  payload->metadata.debug = histUV.quality;
 
   payload->header.length =
       sizeof(Metadata) +
       (NUMBER_OF_STRIDES * NUMBER_OF_BLOCKS_PER_STRIDE * sizeof(Coordinate));
 
-  uint32_t elapsed_cycles = DWT_GetCycles() - start_cycles;
-  payload->metadata.elapsed_time_ms =
-      elapsed_cycles / (HAL_RCC_GetHCLKFreq() / 1000U);
-  payload->metadata.stack_mem_usage = Stack_GetPeakUsage();
-  payload->metadata.heap_mem_usage = Heap_GetPeakUsage();
+  uint32_t elapsedCycles = DWT_GetCycles() - startCycles;
+  payload->metadata.elapsedStrideTimeMs =
+      elapsedStrideCycles / (HAL_RCC_GetHCLKFreq() / 1000U);
+  payload->metadata.elapsedTotalTimeMs =
+      elapsedCycles / (HAL_RCC_GetHCLKFreq() / 1000U);
+
+  payload->metadata.stackMemUsage = Stack_GetPeakUsage();
+  payload->metadata.heapMemUsage = Heap_GetPeakUsage();
 }

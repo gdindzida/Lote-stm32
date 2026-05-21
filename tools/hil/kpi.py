@@ -86,7 +86,7 @@ def compute_and_print_kpi(
     try:
         vx_pred = np.array([fr.meta.vx for fr in frame_reads], dtype=np.float64)
         vy_pred = np.array([fr.meta.vy for fr in frame_reads], dtype=np.float64)
-        helper_pred = np.array([fr.meta.omega for fr in frame_reads], dtype=np.float64)
+        debug_signal = np.array([fr.meta.debug for fr in frame_reads], dtype=np.float64)
 
         vx_gt = np.zeros(len(frame_reads))
         vy_gt = np.zeros(len(frame_reads))
@@ -148,7 +148,7 @@ def compute_and_print_kpi(
 
         if plot_kpi:
             print(f"Plotting velocities!")
-            plot_velocities(vx_pred, vy_pred, helper_pred, vx_gt, vy_gt)
+            plot_velocities(vx_pred, vy_pred, debug_signal, vx_gt, vy_gt)
 
     except Exception as exc:
         print(f"KPI computation failed: {exc}")

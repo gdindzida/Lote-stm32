@@ -6,7 +6,7 @@ PACKET_SIZE = 64
 SEND_HEADER_FMT = "<HHffffffffffffff"
 RECV_HEADER_FMT = "<HH"
 APP_RX_BUFFER_SIZE = 9216
-METADATA_FMT = "<IhhHfffff"
+METADATA_FMT = "<IIHfffff"
 COORD_FMT = "<hhB"
 NUM_COORDS = 121  # 11 columns × 11 rows
 
@@ -14,14 +14,13 @@ NUM_COORDS = 121  # 11 columns × 11 rows
 @dataclass
 class Metadata:
     process_elapsed_time_ms: int
-    u_sum: int
-    v_sum: int
+    stride_elapsed_tim_ms: int
     num_points: int
     stack_mem_usage: float
     heap_mem_usage: float
     vx: float
     vy: float
-    omega: float
+    debug: float
 
 
 @dataclass

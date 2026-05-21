@@ -45,14 +45,14 @@ typedef struct __attribute__((packed)) {
   uint16_t magic;  // Magic number (0xABCD)
   uint16_t length; // Payload length
   // Input metadata: pose and timing (28 bytes)
-  float dt;  // Time since previous frame (seconds)
-  float h;   // Height
-  float a_x; //
-  float a_y; //
-  float a_z; //
-  float w_x; // Roll angle (radians)
-  float w_y; // Pitch angle (radians)
-  float w_z; // Yaw angle (radians)
+  float dt; // Time since previous frame (seconds)
+  float h;  // Height
+  float ax; //
+  float ay; //
+  float az; //
+  float wx; // Roll angle (radians)
+  float wy; // Pitch angle (radians)
+  float wz; // Yaw angle (radians)
   // Camera calibration parameters (24 bytes)
   float fx; // Focal length x (pixels)
   float fy; // Focal length y (pixels)
@@ -70,15 +70,14 @@ typedef struct __attribute__((packed)) {
 
 // NOLINTNEXTLINE
 typedef struct __attribute__((packed)) {
-  uint32_t elapsed_time_ms;
-  int16_t sum_u;
-  int16_t sum_v;
-  uint16_t num_points;
-  float stack_mem_usage;
-  float heap_mem_usage;
+  uint32_t elapsedTotalTimeMs;
+  uint32_t elapsedStrideTimeMs;
+  uint16_t numPoints;
+  float stackMemUsage;
+  float heapMemUsage;
   float vx;
   float vy;
-  float omega;
+  float debug;
 } Metadata;
 
 // NOLINTNEXTLINE
