@@ -164,14 +164,33 @@ HistogramUV findMax(Histogram &hist) {
   return {0, 0, 0, 0.F};
 }
 
-void predict(LinearKalmanFilter &lkf, float ax, float ay, float dt) {
-  // State prediction
-  lkf.vx += ax * dt;
-  lkf.vy += ay * dt;
+void predict(LinearKalmanFilter &lkf, float dt) {
+  // State prediction using modeled acceleration (no IMU input)
+  // [vx; ax] transition: F = [1 dt; 0 1]
+  lkf.vx += lkf.ax * dt;
+  lkf.vy += lkf.ay * dt;
+  // ax, ay remain unchanged (constant acceleration model)
 
-  // Covariance prediction
-  lkf.P00 += lkf.Q;
-  lkf.P11 += lkf.Q;
+  float dt2 = dt * dt;
+
+  // Covariance prediction for x-subsystem: P_new = F*P*F^T + Q
+  // P00_new = P00 + 2*dt*P02 + dt²*P22 + Qv
+  // P02_new = P02 + dt*P22
+  // P22_new = P22 + Qa
+  float P00x_new = lkf.P00 + 2.F * dt * lkf.P02 + dt2 * lkf.P22 + lkf.Qv;
+  float P02x_new = lkf.P02 + dt * lkf.P22;
+  float P22x_new = lkf.P22 + lkf.Qa;
+  lkf.P00 = P00x_new;
+  lkf.P02 = P02x_new;
+  lkf.P22 = P22x_new;
+
+  // Covariance prediction for y-subsystem (same structure)
+  float P11y_new = lkf.P11 + 2.F * dt * lkf.P13 + dt2 * lkf.P33 + lkf.Qv;
+  float P13y_new = lkf.P13 + dt * lkf.P33;
+  float P33y_new = lkf.P33 + lkf.Qa;
+  lkf.P11 = P11y_new;
+  lkf.P13 = P13y_new;
+  lkf.P33 = P33y_new;
 }
 
 void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
@@ -181,25 +200,42 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
   // Adaptive measurement noise
   float R = 0.01F + ((1.0F - quality) * 1.0F);
 
-  // Innovation
+  // Innovation (optical flow measurement only; H = [1 0] for each subsystem)
   float ix = vx_meas - lkf.vx;
   float iy = vy_meas - lkf.vy;
 
-  // Innovation covariance
-  float S00 = lkf.P00 + R;
-  float S11 = lkf.P11 + R;
+  // Innovation covariance: S = H*P*H^T + R = P00 (or P11) + R
+  float Sx = lkf.P00 + R;
+  float Sy = lkf.P11 + R;
 
-  // Kalman gain
-  float K00 = lkf.P00 / S00;
-  float K11 = lkf.P11 / S11;
+  // Kalman gains for x-subsystem: K = P*H^T / S = [P00; P02] / Sx
+  float Kv_x = lkf.P00 / Sx; // gain for vx
+  float Ka_x = lkf.P02 / Sx; // gain for ax
+
+  // Kalman gains for y-subsystem: K = [P11; P13] / Sy
+  float Kv_y = lkf.P11 / Sy; // gain for vy
+  float Ka_y = lkf.P13 / Sy; // gain for ay
 
   // State update
-  lkf.vx += K00 * ix;
-  lkf.vy += K11 * iy;
+  lkf.vx += Kv_x * ix;
+  lkf.ax += Ka_x * ix;
+  lkf.vy += Kv_y * iy;
+  lkf.ay += Ka_y * iy;
 
-  // Covariance update
-  lkf.P00 *= (1.0F - K00);
-  lkf.P11 *= (1.0F - K11);
+  // Covariance update: P_new = (I - K*H)*P
+  // x-subsystem: P00_new = P00*(1-Kv_x), P02_new = P02*(1-Kv_x),
+  //              P22_new = P22 - Ka_x*P02
+  float P02x_old = lkf.P02;
+  lkf.P22 -= Ka_x * P02x_old;
+  lkf.P00 *= (1.0F - Kv_x);
+  lkf.P02 *= (1.0F - Kv_x);
+
+  // y-subsystem: P11_new = P11*(1-Kv_y), P13_new = P13*(1-Kv_y),
+  //              P33_new = P33 - Ka_y*P13
+  float P13y_old = lkf.P13;
+  lkf.P33 -= Ka_y * P13y_old;
+  lkf.P11 *= (1.0F - Kv_y);
+  lkf.P13 *= (1.0F - Kv_y);
 }
 
 } // namespace
@@ -214,8 +250,6 @@ extern "C" void process_data(Payload *payload,
 
   static float vxFilt = 0.F;
   static float vyFilt = 0.F;
-  static float axFilt = 0.F;
-  static float ayFilt = 0.F;
 
   // Get pointer to the current buffer slot
   uint8_t *currbufferView = rxBuffer;
@@ -251,18 +285,12 @@ extern "C" void process_data(Payload *payload,
                                (packetHeader.fy * packetHeader.dt),
                            -10.F, 10.F);
 
-  // Low pass filter
-  float alpha = packetHeader.dt / (packetHeader.dt + TAU);
+  // Kalman filter: state = [vx, vy, ax, ay]; acceleration modeled, no IMU input
+  // Init: {vx, vy, ax, ay, P00, P02, P22, P11, P13, P33, Qv, Qa}
+  static LinearKalmanFilter lkf = {0.F, 0.F, 0.F, 0.F, 1.F,   0.F,
+                                   1.F, 1.F, 0.F, 1.F, 0.05F, 0.1F};
 
-  // vxFilt = (alpha * vxRaw) + ((1.F - alpha) * vxFilt);
-  // vyFilt = (alpha * vyRaw) + ((1.F - alpha) * vyFilt);
-  axFilt = (alpha * packetHeader.ax) + ((1.F - alpha) * axFilt);
-  ayFilt = (alpha * packetHeader.ay) + ((1.F - alpha) * ayFilt);
-
-  // Kalman filter
-  static LinearKalmanFilter lkf = {0.F, 0.F, 1.F, 0.F, 0.F, 1.F, 0.05F};
-
-  predict(lkf, axFilt, ayFilt, packetHeader.dt);
+  predict(lkf, packetHeader.dt);
   update(lkf, vxRaw, vyRaw, histUV.quality);
   vxFilt = lkf.vx;
   vyFilt = lkf.vy;

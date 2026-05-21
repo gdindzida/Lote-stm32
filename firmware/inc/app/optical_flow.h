@@ -29,18 +29,25 @@ struct HistogramUV {
 };
 
 struct LinearKalmanFilter {
-  // State
+  // State: [vx, vy, ax, ay]
   float vx;
   float vy;
+  float ax; // modeled acceleration x (not from IMU)
+  float ay; // modeled acceleration y (not from IMU)
 
-  // Covariance matrix
-  float P00;
-  float P01;
-  float P10;
-  float P11;
+  // Covariance for x-subsystem [vx, ax]: symmetric 2x2
+  float P00; // cov(vx, vx)
+  float P02; // cov(vx, ax)
+  float P22; // cov(ax, ax)
+
+  // Covariance for y-subsystem [vy, ay]: symmetric 2x2
+  float P11; // cov(vy, vy)
+  float P13; // cov(vy, ay)
+  float P33; // cov(ay, ay)
 
   // Process noise
-  float Q;
+  float Qv; // velocity process noise variance
+  float Qa; // acceleration process noise variance
 };
 
 void process_data(Payload *payload, WorkPackageType work_package_type,
