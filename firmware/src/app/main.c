@@ -53,7 +53,7 @@ int main(void) {
     if (workPackageType != NO_WORK) {
       uint16_t length = 0;
       if (isFirst == false) {
-        process_data(&payload, workPackageType, localPacketHeader);
+        estimate_optical_flow(&payload, workPackageType, localPacketHeader);
         length = sizeof(Payload);
         memcpy(txBuffer, &payload, length);
         CDC_Transmit_FS(txBuffer, length);

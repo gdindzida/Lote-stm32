@@ -12,6 +12,11 @@
 
 namespace {
 
+// debug measuring
+volatile uint32_t startOfScope;
+volatile uint32_t durationOfScope;
+volatile uint32_t sumOfScope = 0;
+
 constexpr std::array<Coordinate, (SEARCH_SIZE * 2 + 1) * (SEARCH_SIZE * 2 + 1)>
 make_search_indices() {
   std::array<Coordinate, (SEARCH_SIZE * 2 + 1) * (SEARCH_SIZE * 2 + 1)> ret{};
@@ -33,19 +38,18 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
   return (row * width) + col;
 }
 
-void process_stride(const uint8_t *curr_img_stride,
-                    const uint8_t *prev_img_stride, Histogram &hist,
-                    Payload *payload, int32_t &index) {
+void process_stride(const uint8_t *currImgStride, const uint8_t *prevImgStride,
+                    Histogram &hist, Payload *payload, int32_t &index) {
 
   for (int blockIndex = 0; blockIndex < NUMBER_OF_BLOCKS_PER_STRIDE;
        ++blockIndex) {
 
-    int min_sad = SAD_MAX;
+    uint32_t min_sad = SAD_MAX;
 
     int16_t colOffset = 0;
     int16_t rowOffset = 0;
 
-    Coordinate current_start = {
+    Coordinate previousStart = {
         static_cast<int16_t>(SEARCH_SIZE),
         static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * blockIndex)),
         false};
@@ -54,10 +58,10 @@ void process_stride(const uint8_t *curr_img_stride,
     int psum2 = 0;
     for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
       for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-        int current_val = static_cast<int>(prev_img_stride[coord_to_index(
-            current_start.row + row, current_start.col + col, IMG_W)]);
-        psum += current_val;
-        psum2 += current_val * current_val;
+        int currentVal = static_cast<int>(prevImgStride[coord_to_index(
+            previousStart.row + row, previousStart.col + col, IMG_W)]);
+        psum += currentVal;
+        psum2 += currentVal * currentVal;
       }
     }
     float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
@@ -73,21 +77,25 @@ void process_stride(const uint8_t *curr_img_stride,
     }
 
     for (const Coordinate &search_index : search_indices) {
-      int sad = 0;
-      Coordinate candidate_start = {
-          static_cast<int16_t>(current_start.row + search_index.row),
-          static_cast<int16_t>(current_start.col + search_index.col), false};
+      Coordinate candidateStart = {
+          static_cast<int16_t>(previousStart.row + search_index.row),
+          static_cast<int16_t>(previousStart.col + search_index.col), false};
 
+      uint32_t sad = 0;
       for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
-        for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-          int current_val = static_cast<int>(prev_img_stride[coord_to_index(
-              current_start.row + row, current_start.col + col, IMG_W)]);
-          int candidate_val = static_cast<int>(curr_img_stride[coord_to_index(
-              candidate_start.row + row, candidate_start.col + col, IMG_W)]);
-
-          const int diff = candidate_val - current_val;
-          sad += diff < 0 ? -diff : diff;
-        }
+        uint32_t candidateIndex =
+            coord_to_index(candidateStart.row + row, candidateStart.col, IMG_W);
+        uint32_t prevIndex =
+            coord_to_index(previousStart.row + row, previousStart.col, IMG_W);
+        sad =
+            __USADA8(static_cast<uint32_t>(prevImgStride[prevIndex]),
+                     static_cast<uint32_t>(currImgStride[candidateIndex]), sad);
+        sad =
+            __USADA8(static_cast<uint32_t>(
+                         prevImgStride[prevIndex + (SAD_BLOCK_SIZE / 2)]),
+                     static_cast<uint32_t>(
+                         currImgStride[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
+                     sad);
       }
 
       if (sad < min_sad) {
@@ -240,9 +248,9 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
 
 } // namespace
 
-extern "C" void process_data(Payload *payload,
-                             WorkPackageType work_package_type,
-                             RecvPacketHeader packetHeader) {
+extern "C" void estimate_optical_flow(Payload *payload,
+                                      WorkPackageType work_package_type,
+                                      RecvPacketHeader packetHeader) {
   uint32_t startCycles = DWT_GetCycles();
 
   payload->header.magic = MAGIC;
@@ -263,11 +271,13 @@ extern "C" void process_data(Payload *payload,
 
   int32_t coordIndex = 0;
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
+    startOfScope = DWT_GetCycles();
     process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
                    prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
                    hist, payload, coordIndex);
+    durationOfScope = DWT_GetCycles() - startOfScope;
+    sumOfScope += durationOfScope;
   }
-  uint32_t elapsedStrideCycles = DWT_GetCycles() - startCycles;
 
   HistogramUV histUV = findMax(hist);
 
@@ -306,7 +316,8 @@ extern "C" void process_data(Payload *payload,
 
   uint32_t elapsedCycles = DWT_GetCycles() - startCycles;
   payload->metadata.elapsedStrideTimeMs =
-      elapsedStrideCycles / (HAL_RCC_GetHCLKFreq() / 1000U);
+      (sumOfScope / NUMBER_OF_STRIDES) / (HAL_RCC_GetHCLKFreq() / 1000U);
+  sumOfScope = 0;
   payload->metadata.elapsedTotalTimeMs =
       elapsedCycles / (HAL_RCC_GetHCLKFreq() / 1000U);
 

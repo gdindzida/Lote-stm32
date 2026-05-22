@@ -50,8 +50,8 @@ struct LinearKalmanFilter {
   float Qa; // acceleration process noise variance
 };
 
-void process_data(Payload *payload, WorkPackageType work_package_type,
-                  RecvPacketHeader packetHeader);
+void estimate_optical_flow(Payload *payload, WorkPackageType work_package_type,
+                           RecvPacketHeader packetHeader);
 
 #ifdef __cplusplus
 }
