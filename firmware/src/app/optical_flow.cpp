@@ -87,14 +87,26 @@ void process_stride(const uint8_t *currImgStride, const uint8_t *prevImgStride,
             coord_to_index(candidateStart.row + row, candidateStart.col, IMG_W);
         uint32_t prevIndex =
             coord_to_index(previousStart.row + row, previousStart.col, IMG_W);
+        // sad =
+        //     __USADA8(static_cast<uint32_t>(prevImgStride[prevIndex]),
+        //              static_cast<uint32_t>(currImgStride[candidateIndex]),
+        //              sad);
+        // sad =
+        //     __USADA8(static_cast<uint32_t>(
+        //                  prevImgStride[prevIndex + (SAD_BLOCK_SIZE / 2)]),
+        //              static_cast<uint32_t>(
+        //                  currImgStride[candidateIndex + (SAD_BLOCK_SIZE /
+        //                  2)]),
+        //              sad);
+        sad = __USADA8(
+            *reinterpret_cast<const uint32_t *>(&prevImgStride[prevIndex]),
+            *reinterpret_cast<const uint32_t *>(&currImgStride[candidateIndex]),
+            sad);
         sad =
-            __USADA8(static_cast<uint32_t>(prevImgStride[prevIndex]),
-                     static_cast<uint32_t>(currImgStride[candidateIndex]), sad);
-        sad =
-            __USADA8(static_cast<uint32_t>(
-                         prevImgStride[prevIndex + (SAD_BLOCK_SIZE / 2)]),
-                     static_cast<uint32_t>(
-                         currImgStride[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
+            __USADA8(*reinterpret_cast<const uint32_t *>(
+                         &prevImgStride[prevIndex + (SAD_BLOCK_SIZE / 2)]),
+                     *reinterpret_cast<const uint32_t *>(
+                         &currImgStride[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
                      sad);
       }
 
