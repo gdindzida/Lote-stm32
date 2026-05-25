@@ -3,12 +3,16 @@
 #include "app/image.h"
 #include "app/shared_memory.h"
 #include "bsp/dwt.h"
+#include "stm32g431xx.h"
 #include "system/sysmem.h"
 #include "usbd_def.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
+#include <stdalign.h>
+#include <string.h>
 
 namespace {
 
@@ -38,93 +42,112 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
   return (row * width) + col;
 }
 
-void process_stride(const uint8_t *currImgStride, const uint8_t *prevImgStride,
-                    Histogram &hist, Payload *payload, int32_t &index) {
+void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
+                   Histogram &hist, Payload *payload, int32_t &index) {
+  uint32_t min_sad = SAD_MAX;
 
+  int16_t colOffset = 0;
+  int16_t rowOffset = 0;
+
+  int psum = 0;
+  int psum2 = 0;
+  // uint32_t word;
+  // for (int i = 0; i < (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE) / 4; ++i) {
+  //   std::memcpy(&word, &prevImgPatch[i * 4], 4);
+  //   // extract bytes manually for psum/psum2
+  //   uint8_t b0 = word & 0xFF, b1 = (word >> 8) & 0xFF;
+  //   uint8_t b2 = (word >> 16) & 0xFF, b3 = (word >> 24) & 0xFF;
+  //   psum += b0 + b1 + b2 + b3;
+  //   psum2 += b0 * b0 + b1 * b1 + b2 * b2 + b3 * b3;
+  // }
+  for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
+    for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
+      int currentVal =
+          static_cast<int>(prevImgPatch[(row * SAD_BLOCK_SIZE) + col]);
+      psum += currentVal;
+      psum2 += currentVal * currentVal;
+    }
+  }
+  float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
+  float variance =
+      (static_cast<float>(psum2) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE)) -
+      (mean * mean);
+
+  payload->coordinates[index] = {rowOffset, colOffset, false};
+
+  if (variance < VAR_MIN) {
+    index++;
+    return;
+  }
+
+  for (const Coordinate &search_index : search_indices) {
+    Coordinate candidateStart = {
+        static_cast<int16_t>(SEARCH_SIZE + search_index.row),
+        static_cast<int16_t>(SEARCH_SIZE + search_index.col), false};
+
+    uint32_t sad = 0;
+    for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
+      uint32_t candidateIndex =
+          ((candidateStart.row + row) * SEARCH_PATCH_SIZE) + candidateStart.col;
+      uint32_t prevIndex = row * SAD_BLOCK_SIZE;
+
+      sad = __USADA8(
+          *reinterpret_cast<const uint32_t *>(&prevImgPatch[prevIndex]),
+          *reinterpret_cast<const uint32_t *>(&currImgPatch[candidateIndex]),
+          sad);
+      sad = __USADA8(*reinterpret_cast<const uint32_t *>(
+                         &prevImgPatch[prevIndex + (SAD_BLOCK_SIZE / 2)]),
+                     *reinterpret_cast<const uint32_t *>(
+                         &currImgPatch[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
+                     sad);
+    }
+
+    if (sad < min_sad) {
+      min_sad = sad;
+      colOffset = search_index.col;
+      rowOffset = search_index.row;
+    }
+  }
+
+  payload->coordinates[index] = {rowOffset, colOffset, false};
+  index++;
+
+  if (min_sad < SAD_CEILING) {
+    hist.colOffsets[colOffset + SEARCH_SIZE]++;
+    hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
+    payload->coordinates[index - 1].valid = true;
+  }
+}
+
+void process_stride_in_patches(const uint8_t *currImgStride,
+                               const uint8_t *prevImgStride, Histogram &hist,
+                               Payload *payload, int32_t &index) {
+
+  alignas(4) std::array<uint8_t, SAD_BLOCK_SIZE * SAD_BLOCK_SIZE> prevPatch;
+  alignas(4) std::array<uint8_t, SEARCH_PATCH_SIZE * SEARCH_PATCH_SIZE>
+      currPatch;
   for (int blockIndex = 0; blockIndex < NUMBER_OF_BLOCKS_PER_STRIDE;
        ++blockIndex) {
 
-    uint32_t min_sad = SAD_MAX;
-
-    int16_t colOffset = 0;
-    int16_t rowOffset = 0;
-
-    Coordinate previousStart = {
-        static_cast<int16_t>(SEARCH_SIZE),
-        static_cast<int16_t>(SEARCH_SIZE + (SAD_BLOCK_SIZE * blockIndex)),
-        false};
-
-    int psum = 0;
-    int psum2 = 0;
-    for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
-      for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-        int currentVal = static_cast<int>(prevImgStride[coord_to_index(
-            previousStart.row + row, previousStart.col + col, IMG_W)]);
-        psum += currentVal;
-        psum2 += currentVal * currentVal;
-      }
-    }
-    float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
-    float variance =
-        (static_cast<float>(psum2) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE)) -
-        (mean * mean);
-
-    payload->coordinates[index] = {rowOffset, colOffset, false};
-
-    if (variance < VAR_MIN) {
-      index++;
-      continue;
+    for (int rowIndex = 0; rowIndex < SAD_BLOCK_SIZE; ++rowIndex) {
+      int row = SEARCH_SIZE + rowIndex;
+      int col = SEARCH_SIZE + (SAD_BLOCK_SIZE * blockIndex);
+      int rowCopyIndex = (row * IMG_W) + col;
+      std::memcpy(prevPatch.data() + (SAD_BLOCK_SIZE * rowIndex),
+                  &prevImgStride[rowCopyIndex], SAD_BLOCK_SIZE);
     }
 
-    for (const Coordinate &search_index : search_indices) {
-      Coordinate candidateStart = {
-          static_cast<int16_t>(previousStart.row + search_index.row),
-          static_cast<int16_t>(previousStart.col + search_index.col), false};
-
-      uint32_t sad = 0;
-      for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
-        uint32_t candidateIndex =
-            coord_to_index(candidateStart.row + row, candidateStart.col, IMG_W);
-        uint32_t prevIndex =
-            coord_to_index(previousStart.row + row, previousStart.col, IMG_W);
-        // sad =
-        //     __USADA8(static_cast<uint32_t>(prevImgStride[prevIndex]),
-        //              static_cast<uint32_t>(currImgStride[candidateIndex]),
-        //              sad);
-        // sad =
-        //     __USADA8(static_cast<uint32_t>(
-        //                  prevImgStride[prevIndex + (SAD_BLOCK_SIZE / 2)]),
-        //              static_cast<uint32_t>(
-        //                  currImgStride[candidateIndex + (SAD_BLOCK_SIZE /
-        //                  2)]),
-        //              sad);
-        sad = __USADA8(
-            *reinterpret_cast<const uint32_t *>(&prevImgStride[prevIndex]),
-            *reinterpret_cast<const uint32_t *>(&currImgStride[candidateIndex]),
-            sad);
-        sad =
-            __USADA8(*reinterpret_cast<const uint32_t *>(
-                         &prevImgStride[prevIndex + (SAD_BLOCK_SIZE / 2)]),
-                     *reinterpret_cast<const uint32_t *>(
-                         &currImgStride[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
-                     sad);
-      }
-
-      if (sad < min_sad) {
-        min_sad = sad;
-        colOffset = search_index.col;
-        rowOffset = search_index.row;
-      }
+    for (int rowIndex = 0; rowIndex < SEARCH_PATCH_SIZE; ++rowIndex) {
+      int col = SAD_BLOCK_SIZE * blockIndex;
+      int rowCopyIndex = (rowIndex * IMG_W) + col;
+      std::memcpy(currPatch.data() + (SEARCH_PATCH_SIZE * rowIndex),
+                  &currImgStride[rowCopyIndex], SEARCH_PATCH_SIZE);
     }
 
-    payload->coordinates[index] = {rowOffset, colOffset, false};
-    index++;
-
-    if (min_sad < SAD_CEILING) {
-      hist.colOffsets[colOffset + SEARCH_SIZE]++;
-      hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
-      payload->coordinates[index - 1].valid = true;
-    }
+    startOfScope = DWT_GetCycles();
+    process_patch(currPatch.data(), prevPatch.data(), hist, payload, index);
+    durationOfScope = DWT_GetCycles() - startOfScope;
+    sumOfScope += durationOfScope;
   }
 }
 
@@ -283,12 +306,13 @@ extern "C" void estimate_optical_flow(Payload *payload,
 
   int32_t coordIndex = 0;
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
-    startOfScope = DWT_GetCycles();
-    process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
-                   prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
-                   hist, payload, coordIndex);
-    durationOfScope = DWT_GetCycles() - startOfScope;
-    sumOfScope += durationOfScope;
+    // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
+    //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
+    //                hist, payload, coordIndex);
+    process_stride_in_patches(
+        currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
+        prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), hist, payload,
+        coordIndex);
   }
 
   HistogramUV histUV = findMax(hist);
