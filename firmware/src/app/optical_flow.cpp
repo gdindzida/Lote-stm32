@@ -44,39 +44,39 @@ inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
 
 void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
                    Histogram &hist, Payload *payload, int32_t &index) {
-  uint32_t min_sad = SAD_MAX;
+  uint32_t min_sad = SAD_CEILING;
 
   int16_t colOffset = 0;
   int16_t rowOffset = 0;
 
   int psum = 0;
   int psum2 = 0;
-  // uint32_t word;
-  // for (int i = 0; i < (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE) / 4; ++i) {
-  //   std::memcpy(&word, &prevImgPatch[i * 4], 4);
-  //   // extract bytes manually for psum/psum2
-  //   uint8_t b0 = word & 0xFF, b1 = (word >> 8) & 0xFF;
-  //   uint8_t b2 = (word >> 16) & 0xFF, b3 = (word >> 24) & 0xFF;
-  //   psum += b0 + b1 + b2 + b3;
-  //   psum2 += b0 * b0 + b1 * b1 + b2 * b2 + b3 * b3;
-  // }
-  for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
-    for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-      int currentVal =
-          static_cast<int>(prevImgPatch[(row * SAD_BLOCK_SIZE) + col]);
-      psum += currentVal;
-      psum2 += currentVal * currentVal;
-    }
+  uint32_t word;
+  for (int i = 0; i < (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE) / 4; ++i) {
+    std::memcpy(&word, &prevImgPatch[i * 4], 4);
+    // extract bytes manually for psum/psum2
+    uint8_t b0 = word & 0xFF, b1 = (word >> 8) & 0xFF;
+    uint8_t b2 = (word >> 16) & 0xFF, b3 = (word >> 24) & 0xFF;
+    psum += b0 + b1 + b2 + b3;
+    psum2 += b0 * b0 + b1 * b1 + b2 * b2 + b3 * b3;
   }
+  // for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
+  //   for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
+  //     int currentVal =
+  //         static_cast<int>(prevImgPatch[(row * SAD_BLOCK_SIZE) + col]);
+  //     psum += currentVal;
+  //     psum2 += currentVal * currentVal;
+  //   }
+  // }
   float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
   float variance =
       (static_cast<float>(psum2) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE)) -
       (mean * mean);
 
   payload->coordinates[index] = {rowOffset, colOffset, false};
+  index++;
 
   if (variance < VAR_MIN) {
-    index++;
     return;
   }
 
@@ -86,6 +86,7 @@ void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
         static_cast<int16_t>(SEARCH_SIZE + search_index.col), false};
 
     uint32_t sad = 0;
+    bool goodCandidate = true;
     for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
       uint32_t candidateIndex =
           ((candidateStart.row + row) * SEARCH_PATCH_SIZE) + candidateStart.col;
@@ -100,17 +101,19 @@ void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
                      *reinterpret_cast<const uint32_t *>(
                          &currImgPatch[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
                      sad);
+
+      if (sad > min_sad) {
+        break;
+        goodCandidate = false;
+      }
     }
 
-    if (sad < min_sad) {
+    if (goodCandidate && sad < min_sad) {
       min_sad = sad;
       colOffset = search_index.col;
       rowOffset = search_index.row;
     }
   }
-
-  payload->coordinates[index] = {rowOffset, colOffset, false};
-  index++;
 
   if (min_sad < SAD_CEILING) {
     hist.colOffsets[colOffset + SEARCH_SIZE]++;
@@ -208,18 +211,11 @@ HistogramUV findMax(Histogram &hist) {
 }
 
 void predict(LinearKalmanFilter &lkf, float dt) {
-  // State prediction using modeled acceleration (no IMU input)
-  // [vx; ax] transition: F = [1 dt; 0 1]
   lkf.vx += lkf.ax * dt;
   lkf.vy += lkf.ay * dt;
-  // ax, ay remain unchanged (constant acceleration model)
 
   float dt2 = dt * dt;
 
-  // Covariance prediction for x-subsystem: P_new = F*P*F^T + Q
-  // P00_new = P00 + 2*dt*P02 + dt²*P22 + Qv
-  // P02_new = P02 + dt*P22
-  // P22_new = P22 + Qa
   float P00x_new = lkf.P00 + 2.F * dt * lkf.P02 + dt2 * lkf.P22 + lkf.Qv;
   float P02x_new = lkf.P02 + dt * lkf.P22;
   float P22x_new = lkf.P22 + lkf.Qa;
@@ -227,7 +223,6 @@ void predict(LinearKalmanFilter &lkf, float dt) {
   lkf.P02 = P02x_new;
   lkf.P22 = P22x_new;
 
-  // Covariance prediction for y-subsystem (same structure)
   float P11y_new = lkf.P11 + 2.F * dt * lkf.P13 + dt2 * lkf.P33 + lkf.Qv;
   float P13y_new = lkf.P13 + dt * lkf.P33;
   float P33y_new = lkf.P33 + lkf.Qa;
@@ -240,41 +235,30 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
             float quality) {
   quality = std::clamp(quality, 0.0F, 1.0F);
 
-  // Adaptive measurement noise
   float R = 0.01F + ((1.0F - quality) * 1.0F);
 
-  // Innovation (optical flow measurement only; H = [1 0] for each subsystem)
   float ix = vx_meas - lkf.vx;
   float iy = vy_meas - lkf.vy;
 
-  // Innovation covariance: S = H*P*H^T + R = P00 (or P11) + R
   float Sx = lkf.P00 + R;
   float Sy = lkf.P11 + R;
 
-  // Kalman gains for x-subsystem: K = P*H^T / S = [P00; P02] / Sx
-  float Kv_x = lkf.P00 / Sx; // gain for vx
-  float Ka_x = lkf.P02 / Sx; // gain for ax
+  float Kv_x = lkf.P00 / Sx;
+  float Ka_x = lkf.P02 / Sx;
 
-  // Kalman gains for y-subsystem: K = [P11; P13] / Sy
-  float Kv_y = lkf.P11 / Sy; // gain for vy
-  float Ka_y = lkf.P13 / Sy; // gain for ay
+  float Kv_y = lkf.P11 / Sy;
+  float Ka_y = lkf.P13 / Sy;
 
-  // State update
   lkf.vx += Kv_x * ix;
   lkf.ax += Ka_x * ix;
   lkf.vy += Kv_y * iy;
   lkf.ay += Ka_y * iy;
 
-  // Covariance update: P_new = (I - K*H)*P
-  // x-subsystem: P00_new = P00*(1-Kv_x), P02_new = P02*(1-Kv_x),
-  //              P22_new = P22 - Ka_x*P02
   float P02x_old = lkf.P02;
   lkf.P22 -= Ka_x * P02x_old;
   lkf.P00 *= (1.0F - Kv_x);
   lkf.P02 *= (1.0F - Kv_x);
 
-  // y-subsystem: P11_new = P11*(1-Kv_y), P13_new = P13*(1-Kv_y),
-  //              P33_new = P33 - Ka_y*P13
   float P13y_old = lkf.P13;
   lkf.P33 -= Ka_y * P13y_old;
   lkf.P11 *= (1.0F - Kv_y);
@@ -306,9 +290,6 @@ extern "C" void estimate_optical_flow(Payload *payload,
 
   int32_t coordIndex = 0;
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
-    // process_stride(currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
-    //                prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
-    //                hist, payload, coordIndex);
     process_stride_in_patches(
         currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
         prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), hist, payload,
