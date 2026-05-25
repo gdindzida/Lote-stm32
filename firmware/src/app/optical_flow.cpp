@@ -49,37 +49,6 @@ void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
   int16_t colOffset = 0;
   int16_t rowOffset = 0;
 
-  int psum = 0;
-  int psum2 = 0;
-  uint32_t word;
-  for (int i = 0; i < (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE) / 4; ++i) {
-    std::memcpy(&word, &prevImgPatch[i * 4], 4);
-    // extract bytes manually for psum/psum2
-    uint8_t b0 = word & 0xFF, b1 = (word >> 8) & 0xFF;
-    uint8_t b2 = (word >> 16) & 0xFF, b3 = (word >> 24) & 0xFF;
-    psum += b0 + b1 + b2 + b3;
-    psum2 += b0 * b0 + b1 * b1 + b2 * b2 + b3 * b3;
-  }
-  // for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
-  //   for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
-  //     int currentVal =
-  //         static_cast<int>(prevImgPatch[(row * SAD_BLOCK_SIZE) + col]);
-  //     psum += currentVal;
-  //     psum2 += currentVal * currentVal;
-  //   }
-  // }
-  float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
-  float variance =
-      (static_cast<float>(psum2) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE)) -
-      (mean * mean);
-
-  payload->coordinates[index] = {rowOffset, colOffset, false};
-  index++;
-
-  if (variance < VAR_MIN) {
-    return;
-  }
-
   for (const Coordinate &search_index : search_indices) {
     Coordinate candidateStart = {
         static_cast<int16_t>(SEARCH_SIZE + search_index.row),
@@ -87,6 +56,7 @@ void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
 
     uint32_t sad = 0;
     bool goodCandidate = true;
+#pragma GCC unroll 8
     for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
       uint32_t candidateIndex =
           ((candidateStart.row + row) * SEARCH_PATCH_SIZE) + candidateStart.col;
@@ -103,8 +73,8 @@ void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
                      sad);
 
       if (sad > min_sad) {
-        break;
         goodCandidate = false;
+        break;
       }
     }
 
@@ -140,6 +110,29 @@ void process_stride_in_patches(const uint8_t *currImgStride,
                   &prevImgStride[rowCopyIndex], SAD_BLOCK_SIZE);
     }
 
+    int psum = 0;
+    int psum2 = 0;
+    for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
+      for (int col = 0; col < SAD_BLOCK_SIZE; ++col) {
+        int currentVal =
+            static_cast<int>(prevPatch[(row * SAD_BLOCK_SIZE) + col]);
+        psum += currentVal;
+        psum2 += currentVal * currentVal;
+      }
+    }
+
+    float mean = static_cast<float>(psum) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE);
+    float variance =
+        (static_cast<float>(psum2) / (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE)) -
+        (mean * mean);
+
+    payload->coordinates[index] = {0, 0, false};
+    index++;
+
+    if (variance < VAR_MIN) {
+      continue;
+    }
+
     for (int rowIndex = 0; rowIndex < SEARCH_PATCH_SIZE; ++rowIndex) {
       int col = SAD_BLOCK_SIZE * blockIndex;
       int rowCopyIndex = (rowIndex * IMG_W) + col;
@@ -147,10 +140,7 @@ void process_stride_in_patches(const uint8_t *currImgStride,
                   &currImgStride[rowCopyIndex], SEARCH_PATCH_SIZE);
     }
 
-    startOfScope = DWT_GetCycles();
     process_patch(currPatch.data(), prevPatch.data(), hist, payload, index);
-    durationOfScope = DWT_GetCycles() - startOfScope;
-    sumOfScope += durationOfScope;
   }
 }
 
@@ -289,12 +279,15 @@ extern "C" void estimate_optical_flow(Payload *payload,
   Histogram hist{};
 
   int32_t coordIndex = 0;
+  startOfScope = DWT_GetCycles();
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
     process_stride_in_patches(
         currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
         prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), hist, payload,
         coordIndex);
   }
+  durationOfScope = DWT_GetCycles() - startOfScope;
+  sumOfScope += durationOfScope;
 
   HistogramUV histUV = findMax(hist);
 
@@ -333,7 +326,7 @@ extern "C" void estimate_optical_flow(Payload *payload,
 
   uint32_t elapsedCycles = DWT_GetCycles() - startCycles;
   payload->metadata.elapsedStrideTimeMs =
-      (sumOfScope / NUMBER_OF_STRIDES) / (HAL_RCC_GetHCLKFreq() / 1000U);
+      (sumOfScope) / (HAL_RCC_GetHCLKFreq() / 1000U);
   sumOfScope = 0;
   payload->metadata.elapsedTotalTimeMs =
       elapsedCycles / (HAL_RCC_GetHCLKFreq() / 1000U);
