@@ -98,6 +98,8 @@ void processPatch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
   if (minSad < SAD_CEILING) {
     hist.colOffsets[colOffset + SEARCH_SIZE]++;
     hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
+    payload->coordinates[index - 1].row = rowOffset;
+    payload->coordinates[index - 1].col = colOffset;
     payload->coordinates[index - 1].valid = true;
   }
 }
