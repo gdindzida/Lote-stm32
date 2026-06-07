@@ -13,6 +13,7 @@ import matplotlib.gridspec as gridspec
 def plot_frame_metrics(
     writes: List[FrameWriteEvent],
     reads: List[FrameReadEvent],
+    save_dir: Optional[str] = None,
 ) -> None:
     """
     Single plot with:
@@ -92,6 +93,15 @@ def plot_frame_metrics(
     ax.grid(True, linestyle="--", alpha=0.4)
 
     plt.tight_layout()
+
+    if save_dir is not None:
+        import os
+
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, "frame_metrics.png")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved plot: {save_path}")
+
     plt.show()
 
 
@@ -103,6 +113,7 @@ def plot_velocities(
     vy_opencv: np.ndarray,
     vx_pos: np.ndarray,
     vy_pos: np.ndarray,
+    save_dir: Optional[str] = None,
 ) -> None:
     """
     Plot velocity estimates from three sources in 3 side-by-side subplots (top row):
@@ -176,4 +187,13 @@ def plot_velocities(
         ax.grid(True, linestyle="--", alpha=0.4)
 
     plt.tight_layout()
+
+    if save_dir is not None:
+        import os
+
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, "velocities.png")
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Saved plot: {save_path}")
+
     plt.show()

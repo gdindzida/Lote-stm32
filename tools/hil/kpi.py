@@ -21,7 +21,7 @@ OpenCV vs GT           OpenCV Farneback compared to position-derived ground trut
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 import cv2
 from hil.frames import FrameReadEvent
 from hil.plot import plot_velocities
@@ -50,15 +50,15 @@ def optical_flow_farneback(
         flow=None,
         pyr_scale=0.5,  # image pyramid scale
         levels=3,  # pyramid levels
-        winsize=15,  # averaging window size
-        iterations=3,  # iterations per pyramid level
-        poly_n=5,  # pixel neighborhood size
-        poly_sigma=1.2,  # Gaussian std for polynomial expansion
+        winsize=20,  # averaging window size
+        iterations=5,  # iterations per pyramid level
+        poly_n=7,  # pixel neighborhood size
+        poly_sigma=1.5,  # Gaussian std for polynomial expansion
         flags=0,
     )
     # flow shape: (H, W, 2) — [:,:,0] = vx, [:,:,1] = vy
-    avg_vx = float(np.mean(flow[:, :, 0]))
-    avg_vy = float(np.mean(flow[:, :, 1]))
+    avg_vx = float(np.median(flow[:, :, 0]))
+    avg_vy = float(np.median(flow[:, :, 1]))
 
     return avg_vx, avg_vy, flow
 
@@ -66,6 +66,7 @@ def optical_flow_farneback(
 def compute_and_print_kpi(
     frame_reads: List[FrameReadEvent],
     plot_kpi: bool = False,
+    save_dir: Optional[str] = None,
 ) -> None:
     """Compute and print velocity KPI metrics comparing STM32 output to ground truth.
 
@@ -81,6 +82,9 @@ def compute_and_print_kpi(
     plot_kpi : bool, optional
         If True, display timeseries plots of predicted vs ground truth
         velocities.  Requires matplotlib.  Default is False.
+    save_dir : str or None, optional
+        Directory in which to save generated plots as PNG files.
+        If None, plots are only displayed (not saved).  Default is None.
     """
     print("")
     print("Computing velocity KPI…")
@@ -119,7 +123,7 @@ def compute_and_print_kpi(
                     frame_reads[i].image, frame_reads[i - 1].image
                 )
                 vx_opencv[i] = (
-                    pvx * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fx)
+                    -pvx * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fx)
                 )
                 vy_opencv[i] = (
                     pvy * frame_reads[i].pz / (frame_reads[i].dt * frame_reads[i].fy)
@@ -190,7 +194,8 @@ def compute_and_print_kpi(
         if plot_kpi:
             print(f"Plotting velocities!")
             plot_velocities(
-                vx_pred, vy_pred, debug_signal, vx_opencv, vy_opencv, vx_pos, vy_pos
+                vx_pred, vy_pred, debug_signal, vx_opencv, vy_opencv, vx_pos, vy_pos,
+                save_dir=save_dir,
             )
 
     except Exception as exc:

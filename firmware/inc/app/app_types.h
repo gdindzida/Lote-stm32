@@ -21,6 +21,9 @@ extern "C" {
 #define VAR_MIN (30)
 #define NUMBER_OF_STRIDES (((IMG_H) / (SAD_BLOCK_SIZE)) - 1)
 #define NUMBER_OF_BLOCKS_PER_STRIDE (((IMG_W) / (SAD_BLOCK_SIZE)) - 1)
+#define NUMBER_OF_BLOCKS_PER_COLUMN (((IMG_H) / (SAD_BLOCK_SIZE)) - 1)
+#define NUMBER_OF_BLOCKS                                                       \
+  (NUMBER_OF_BLOCKS_PER_STRIDE * NUMBER_OF_BLOCKS_PER_COLUMN)
 
 // NOLINTNEXTLINE
 typedef enum {
@@ -80,7 +83,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   SendPacketHeader header;
   Metadata metadata;
-  Coordinate coordinates[121];
+  Coordinate coordinates[NUMBER_OF_BLOCKS];
 } Payload;
 
 #ifdef __cplusplus

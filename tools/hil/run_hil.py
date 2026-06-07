@@ -121,10 +121,11 @@ if __name__ == "__main__":
         type=str,
         metavar="PATH",
         default=None,
-        help="Directory in which to save every annotated big image during playback "
-        "(one PNG per frame, named frame_XXXXXX.png).  The directory is created "
-        "automatically if it does not exist.  Only has effect when --playback or "
-        "--playback-realtime is also specified.",
+        help="Directory in which to save all generated plots and annotated images.  "
+        "Matplotlib plots (frame_metrics.png, velocities.png) are saved here when "
+        "--plot or --plot-kpi are used.  Annotated playback frames (frame_XXXXXX.png) "
+        "are also saved here when --playback or --playback-realtime is specified.  "
+        "The directory is created automatically if it does not exist.",
     )
     parser.add_argument(
         "--timeout",
@@ -258,13 +259,14 @@ if __name__ == "__main__":
     compute_and_print_metrics(frame_writes, frame_reads)
 
     if args.plot:
-        plot_frame_metrics(frame_writes, frame_reads)
+        plot_frame_metrics(frame_writes, frame_reads, save_dir=args.save_dir)
 
     do_kpi = args.kpi or args.plot_kpi
     if do_kpi:
         compute_and_print_kpi(
             frame_reads=frame_reads,
             plot_kpi=args.plot_kpi,
+            save_dir=args.save_dir,
         )
 
     if args.playback is not None or args.playback_realtime:

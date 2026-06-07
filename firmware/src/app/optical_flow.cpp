@@ -50,16 +50,16 @@ makeSearchIndices() {
   return ret;
 }
 
-constexpr auto search_indices = makeSearchIndices();
+constexpr auto searchIndices = makeSearchIndices();
 
 void processPatch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
-                  Histogram &hist, Payload *payload, int32_t &index) {
+                  Payload *payload, int32_t &index) {
   uint32_t minSad = SAD_CEILING;
 
   int16_t colOffset = 0;
   int16_t rowOffset = 0;
 
-  for (const Coordinate &searchIndex : search_indices) {
+  for (const Coordinate &searchIndex : searchIndices) {
     Coordinate candidateStart = {
         static_cast<int16_t>(SEARCH_SIZE + searchIndex.row),
         static_cast<int16_t>(SEARCH_SIZE + searchIndex.col), false};
@@ -96,8 +96,8 @@ void processPatch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
   }
 
   if (minSad < SAD_CEILING) {
-    hist.colOffsets[colOffset + SEARCH_SIZE]++;
-    hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
+    // hist.colOffsets[colOffset + SEARCH_SIZE]++;
+    // hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
     payload->coordinates[index - 1].row = rowOffset;
     payload->coordinates[index - 1].col = colOffset;
     payload->coordinates[index - 1].valid = true;
@@ -105,8 +105,8 @@ void processPatch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
 }
 
 void processStrideInPatches(const uint8_t *currImgStride,
-                            const uint8_t *prevImgStride, Histogram &hist,
-                            Payload *payload, int32_t &index) {
+                            const uint8_t *prevImgStride, Payload *payload,
+                            int32_t &index) {
 
   alignas(4) std::array<uint8_t, SAD_BLOCK_SIZE * SAD_BLOCK_SIZE> prevPatch;
   alignas(4) std::array<uint8_t, SEARCH_PATCH_SIZE * SEARCH_PATCH_SIZE>
@@ -152,7 +152,7 @@ void processStrideInPatches(const uint8_t *currImgStride,
                   &currImgStride[rowCopyIndex], SEARCH_PATCH_SIZE);
     }
 
-    processPatch(currPatch.data(), prevPatch.data(), hist, payload, index);
+    processPatch(currPatch.data(), prevPatch.data(), payload, index);
   }
 }
 
@@ -246,7 +246,7 @@ bool update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
   float innovation = __builtin_sqrtf((invX * invX) + (invY * invY));
   float S = __builtin_sqrtf(lkf.P00 + lkf.P11) + R;
   float sigmaThreshold = S;
-  if (innovation >= 0.5 * sigmaThreshold) {
+  if (innovation >= 3 * sigmaThreshold) {
     return false;
   }
 
@@ -277,6 +277,58 @@ bool update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
   return true;
 }
 
+float estimateFlowYawRate(Payload *payload) {
+  float numerator = 0.F;
+  float denominator = 0.F;
+  for (int coordIndex = 0; coordIndex < NUMBER_OF_BLOCKS; coordIndex++) {
+    auto coord = payload->coordinates[coordIndex];
+    if (coord.valid) {
+      uint8_t blockX = coordIndex % NUMBER_OF_BLOCKS_PER_STRIDE;
+      uint8_t blockY = coordIndex / NUMBER_OF_BLOCKS_PER_STRIDE;
+      float basisX =
+          -(static_cast<float>((blockY + 1) * SAD_BLOCK_SIZE) - CENTER_Y);
+      float basisY =
+          static_cast<float>((blockX + 1) * SAD_BLOCK_SIZE) - CENTER_X;
+
+      float dot = (static_cast<float>(coord.col) * basisX) +
+                  (static_cast<float>(coord.row) * basisY);
+      float mag = (basisX * basisX) + (basisY * basisY);
+
+      numerator += dot;
+      denominator += mag;
+    }
+  }
+
+  return (denominator > 0.F) ? numerator / denominator : 0.F;
+}
+
+void subtractYawRate(Payload *payload, float yawRate, Histogram &hist) {
+  for (int coordIndex = 0; coordIndex < NUMBER_OF_BLOCKS; coordIndex++) {
+    auto &coord = payload->coordinates[coordIndex];
+    if (coord.valid) {
+      uint8_t blockX = coordIndex % NUMBER_OF_BLOCKS_PER_STRIDE;
+      uint8_t blockY = coordIndex / NUMBER_OF_BLOCKS_PER_STRIDE;
+      float basisX =
+          -(static_cast<float>((blockY + 1) * SAD_BLOCK_SIZE) - CENTER_Y);
+      float basisY =
+          static_cast<float>((blockX + 1) * SAD_BLOCK_SIZE) - CENTER_X;
+
+      float compensadedCol = static_cast<float>(coord.col) - (basisX * yawRate);
+      float compensadedRow = static_cast<float>(coord.row) - (basisY * yawRate);
+
+      coord.col = std::clamp(static_cast<int16_t>(compensadedCol),
+                             static_cast<int16_t>(-SEARCH_SIZE),
+                             static_cast<int16_t>(SEARCH_SIZE));
+      coord.row = std::clamp(static_cast<int16_t>(compensadedRow),
+                             static_cast<int16_t>(-SEARCH_SIZE),
+                             static_cast<int16_t>(SEARCH_SIZE));
+
+      hist.colOffsets[coord.col + SEARCH_SIZE]++;
+      hist.rowOffsets[coord.row + SEARCH_SIZE]++;
+    }
+  }
+}
+
 } // namespace
 
 extern "C" void estimateOpticalFlow(Payload *payload,
@@ -305,11 +357,15 @@ extern "C" void estimateOpticalFlow(Payload *payload,
     startOfScope = DWT_GetCycles();
     processStrideInPatches(
         currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
-        prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), hist, payload,
+        prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), payload,
         coordIndex);
     durationOfScope = DWT_GetCycles() - startOfScope;
     sumOfScope += durationOfScope;
   }
+
+  float yawRate = estimateFlowYawRate(payload);
+  yawRate = (yawRate > 0.01) ? yawRate : 0.F;
+  subtractYawRate(payload, yawRate, hist);
 
   HistogramUV histUV = findMax(hist);
 
@@ -333,7 +389,7 @@ extern "C" void estimateOpticalFlow(Payload *payload,
 
   predict(lkf, packetHeader.dt);
   bool success = update(lkf, vxRaw, vyRaw, histUV.quality);
-  vxFilt = lkf.vx;
+  vxFilt = -lkf.vx;
   vyFilt = lkf.vy;
 
   payload->metadata.numPoints = histUV.N;

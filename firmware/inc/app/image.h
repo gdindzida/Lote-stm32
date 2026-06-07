@@ -7,6 +7,8 @@ extern "C" {
 
 #define IMG_W (96)
 #define IMG_H (96)
+#define CENTER_X (47.5F)
+#define CENTER_Y (47.5F)
 
 #ifdef __cplusplus
 }
