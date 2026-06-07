@@ -14,19 +14,12 @@
 #include <string.h>
 
 // app memory
-volatile WorkPackageType currentWorkType = NO_WORK;
-uint8_t rxBuffer[APP_RX_DATA_SIZE];
-uint8_t txBuffer[APP_TX_DATA_SIZE];
-volatile uint32_t rxBufferOffset = 0;
+volatile WorkPackageType g_currentWorkType = NO_WORK;
+uint8_t g_rxBuffer[APP_RX_DATA_SIZE];
+uint8_t g_txBuffer[APP_TX_DATA_SIZE];
+volatile uint32_t g_rxBufferOffset = 0;
+volatile RecvPacketHeader g_currentPacketHeader = {0};
 
-volatile RecvPacketHeader currentPacketHeader = {0};
-
-static Payload payload = {0};
-
-/**
- * @brief  The application entry point.
- * @retval int
- */
 int main(void) {
   Stack_Paint();
   HAL_Init();
@@ -42,21 +35,22 @@ int main(void) {
                 "data size.");
 
   bool isFirst = true;
+  Payload payload = {0};
 
   while (1) {
     __disable_irq();
-    volatile WorkPackageType workPackageType = currentWorkType;
-    RecvPacketHeader localPacketHeader = currentPacketHeader;
-    currentWorkType = NO_WORK;
+    volatile WorkPackageType workPackageType = g_currentWorkType;
+    RecvPacketHeader localPacketHeader = g_currentPacketHeader;
+    g_currentWorkType = NO_WORK;
     __enable_irq();
 
     if (workPackageType != NO_WORK) {
       uint16_t length = 0;
       if (isFirst == false) {
-        estimate_optical_flow(&payload, workPackageType, localPacketHeader);
+        estimateOpticalFlow(&payload, workPackageType, localPacketHeader);
         length = sizeof(Payload);
-        memcpy(txBuffer, &payload, length);
-        CDC_Transmit_FS(txBuffer, length);
+        memcpy(g_txBuffer, &payload, length);
+        CDC_Transmit_FS(g_txBuffer, length);
       } else {
         isFirst = false;
       }

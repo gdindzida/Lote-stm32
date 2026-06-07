@@ -8,14 +8,14 @@ extern "C" {
 #include "app/app_types.h"
 #include <stdint.h>
 
-extern volatile WorkPackageType currentWorkType;
+extern volatile WorkPackageType g_currentWorkType;
 // NOLINTNEXTLINE
-extern uint8_t rxBuffer[APP_RX_DATA_SIZE];
+extern uint8_t g_rxBuffer[APP_RX_DATA_SIZE];
 // NOLINTNEXTLINE
-extern uint8_t txBuffer[APP_TX_DATA_SIZE];
-extern volatile uint32_t rxBufferOffset;
+extern uint8_t g_txBuffer[APP_TX_DATA_SIZE];
+extern volatile uint32_t g_rxBufferOffset;
 
-extern volatile RecvPacketHeader currentPacketHeader;
+extern volatile RecvPacketHeader g_currentPacketHeader;
 
 #ifdef __cplusplus
 }

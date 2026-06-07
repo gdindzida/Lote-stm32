@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #define HISTOGRAM_SIZE ((SEARCH_SIZE * 2) + 1)
-#define TAU (0.2F) // seconds
+#define TAU (0.8F) // seconds
 
 struct Corner {
   uint8_t row;
@@ -50,8 +50,8 @@ struct LinearKalmanFilter {
   float Qa; // acceleration process noise variance
 };
 
-void estimate_optical_flow(Payload *payload, WorkPackageType work_package_type,
-                           RecvPacketHeader packetHeader);
+void estimateOpticalFlow(Payload *payload, WorkPackageType work_package_type,
+                         RecvPacketHeader packetHeader);
 
 #ifdef __cplusplus
 }

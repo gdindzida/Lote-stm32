@@ -10,17 +10,12 @@ extern "C" {
 #include <stdint.h>
 
 #define MAGIC (0xABCD)
-#define PACKET_SIZE (64)
 #define APP_RX_BUFFER_SIZE (9216)
 #define APP_RX_DATA_SIZE (2 * APP_RX_BUFFER_SIZE)
 #define APP_TX_DATA_SIZE (1024)
-#define CENTER_COL (47)
-#define CENTER_ROW (47)
 #define SAD_BLOCK_SIZE (8)
 #define SEARCH_SIZE (4)
 #define SEARCH_PATCH_SIZE (SAD_BLOCK_SIZE + (2 * SEARCH_SIZE))
-#define STRIDE_HEIGHT (SAD_BLOCK_SIZE + 2 * SEARCH_SIZE)
-#define K_FACTOR (2)
 #define SAD_CEILING (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 10)
 #define SAD_MAX (SAD_BLOCK_SIZE * SAD_BLOCK_SIZE * 255)
 #define VAR_MIN (30)

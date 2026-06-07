@@ -22,37 +22,50 @@ volatile uint32_t durationOfScope;
 volatile uint32_t sumOfScope = 0;
 
 constexpr std::array<Coordinate, (SEARCH_SIZE * 2 + 1) * (SEARCH_SIZE * 2 + 1)>
-make_search_indices() {
+makeSearchIndices() {
   std::array<Coordinate, (SEARCH_SIZE * 2 + 1) * (SEARCH_SIZE * 2 + 1)> ret{};
-
   int16_t index = 0;
-  for (int16_t i = -SEARCH_SIZE; i <= SEARCH_SIZE; i++) {
-    for (int16_t j = -SEARCH_SIZE; j <= SEARCH_SIZE; j++) {
-      ret[index++] = {i, j, false};
+
+  ret[index++] = {0, 0, false};
+
+  for (int16_t shell = 1; shell <= SEARCH_SIZE; shell++) {
+    // NOLINTNEXTLINE
+    for (int16_t j = -shell; j <= shell; j++) {
+      ret[index++] = {static_cast<int16_t>(-shell), j, false};
+    }
+
+    // NOLINTNEXTLINE
+    for (int16_t j = -shell; j <= shell; j++) {
+      ret[index++] = {shell, j, false};
+    }
+
+    // NOLINTNEXTLINE
+    for (int16_t i = -shell + 1; i <= shell - 1; i++) {
+      ret[index++] = {i, static_cast<int16_t>(-shell), false};
+    }
+
+    // NOLINTNEXTLINE
+    for (int16_t i = -shell + 1; i <= shell - 1; i++) {
+      ret[index++] = {i, shell, false};
     }
   }
 
   return ret;
 }
 
-constexpr auto search_indices = make_search_indices();
+constexpr auto search_indices = makeSearchIndices();
 
-inline uint32_t coord_to_index(uint8_t row, uint8_t col, uint8_t width) {
-
-  return (row * width) + col;
-}
-
-void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
-                   Histogram &hist, Payload *payload, int32_t &index) {
-  uint32_t min_sad = SAD_CEILING;
+void processPatch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
+                  Histogram &hist, Payload *payload, int32_t &index) {
+  uint32_t minSad = SAD_CEILING;
 
   int16_t colOffset = 0;
   int16_t rowOffset = 0;
 
-  for (const Coordinate &search_index : search_indices) {
+  for (const Coordinate &searchIndex : search_indices) {
     Coordinate candidateStart = {
-        static_cast<int16_t>(SEARCH_SIZE + search_index.row),
-        static_cast<int16_t>(SEARCH_SIZE + search_index.col), false};
+        static_cast<int16_t>(SEARCH_SIZE + searchIndex.row),
+        static_cast<int16_t>(SEARCH_SIZE + searchIndex.col), false};
 
     uint32_t sad = 0;
     bool goodCandidate = true;
@@ -72,29 +85,29 @@ void process_patch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
                          &currImgPatch[candidateIndex + (SAD_BLOCK_SIZE / 2)]),
                      sad);
 
-      if (sad > min_sad) {
+      if (sad > minSad) {
         goodCandidate = false;
         break;
       }
     }
 
-    if (goodCandidate && sad < min_sad) {
-      min_sad = sad;
-      colOffset = search_index.col;
-      rowOffset = search_index.row;
+    if (goodCandidate && sad < minSad) {
+      minSad = sad;
+      colOffset = searchIndex.col;
+      rowOffset = searchIndex.row;
     }
   }
 
-  if (min_sad < SAD_CEILING) {
+  if (minSad < SAD_CEILING) {
     hist.colOffsets[colOffset + SEARCH_SIZE]++;
     hist.rowOffsets[rowOffset + SEARCH_SIZE]++;
     payload->coordinates[index - 1].valid = true;
   }
 }
 
-void process_stride_in_patches(const uint8_t *currImgStride,
-                               const uint8_t *prevImgStride, Histogram &hist,
-                               Payload *payload, int32_t &index) {
+void processStrideInPatches(const uint8_t *currImgStride,
+                            const uint8_t *prevImgStride, Histogram &hist,
+                            Payload *payload, int32_t &index) {
 
   alignas(4) std::array<uint8_t, SAD_BLOCK_SIZE * SAD_BLOCK_SIZE> prevPatch;
   alignas(4) std::array<uint8_t, SEARCH_PATCH_SIZE * SEARCH_PATCH_SIZE>
@@ -140,7 +153,7 @@ void process_stride_in_patches(const uint8_t *currImgStride,
                   &currImgStride[rowCopyIndex], SEARCH_PATCH_SIZE);
     }
 
-    process_patch(currPatch.data(), prevPatch.data(), hist, payload, index);
+    processPatch(currPatch.data(), prevPatch.data(), hist, payload, index);
   }
 }
 
@@ -206,15 +219,15 @@ void predict(LinearKalmanFilter &lkf, float dt) {
 
   float dt2 = dt * dt;
 
-  float P00x_new = lkf.P00 + 2.F * dt * lkf.P02 + dt2 * lkf.P22 + lkf.Qv;
-  float P02x_new = lkf.P02 + dt * lkf.P22;
+  float P00x_new = lkf.P00 + (2.F * dt * lkf.P02) + (dt2 * lkf.P22) + lkf.Qv;
+  float P02x_new = lkf.P02 + (dt * lkf.P22);
   float P22x_new = lkf.P22 + lkf.Qa;
   lkf.P00 = P00x_new;
   lkf.P02 = P02x_new;
   lkf.P22 = P22x_new;
 
-  float P11y_new = lkf.P11 + 2.F * dt * lkf.P13 + dt2 * lkf.P33 + lkf.Qv;
-  float P13y_new = lkf.P13 + dt * lkf.P33;
+  float P11y_new = lkf.P11 + (2.F * dt * lkf.P13) + (dt2 * lkf.P33) + lkf.Qv;
+  float P13y_new = lkf.P13 + (dt * lkf.P33);
   float P33y_new = lkf.P33 + lkf.Qa;
   lkf.P11 = P11y_new;
   lkf.P13 = P13y_new;
@@ -227,8 +240,8 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
 
   float R = 0.01F + ((1.0F - quality) * 1.0F);
 
-  float ix = vx_meas - lkf.vx;
-  float iy = vy_meas - lkf.vy;
+  float invX = vx_meas - lkf.vx;
+  float invY = vy_meas - lkf.vy;
 
   float Sx = lkf.P00 + R;
   float Sy = lkf.P11 + R;
@@ -239,10 +252,10 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
   float Kv_y = lkf.P11 / Sy;
   float Ka_y = lkf.P13 / Sy;
 
-  lkf.vx += Kv_x * ix;
-  lkf.ax += Ka_x * ix;
-  lkf.vy += Kv_y * iy;
-  lkf.ay += Ka_y * iy;
+  lkf.vx += Kv_x * invX;
+  lkf.ax += Ka_x * invX;
+  lkf.vy += Kv_y * invY;
+  lkf.ay += Ka_y * invY;
 
   float P02x_old = lkf.P02;
   lkf.P22 -= Ka_x * P02x_old;
@@ -257,9 +270,9 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
 
 } // namespace
 
-extern "C" void estimate_optical_flow(Payload *payload,
-                                      WorkPackageType work_package_type,
-                                      RecvPacketHeader packetHeader) {
+extern "C" void estimateOpticalFlow(Payload *payload,
+                                    WorkPackageType work_package_type,
+                                    RecvPacketHeader packetHeader) {
   uint32_t startCycles = DWT_GetCycles();
 
   payload->header.magic = MAGIC;
@@ -269,31 +282,31 @@ extern "C" void estimate_optical_flow(Payload *payload,
   static float vyFilt = 0.F;
 
   // Get pointer to the current buffer slot
-  uint8_t *currbufferView = rxBuffer;
-  uint8_t *prevbufferView = rxBuffer + APP_RX_BUFFER_SIZE;
+  uint8_t *currbufferView = g_rxBuffer;
+  uint8_t *prevbufferView = g_rxBuffer + APP_RX_BUFFER_SIZE;
   if (work_package_type == PROCESS_RX_2) {
-    currbufferView = rxBuffer + APP_RX_BUFFER_SIZE;
-    prevbufferView = rxBuffer;
+    currbufferView = g_rxBuffer + APP_RX_BUFFER_SIZE;
+    prevbufferView = g_rxBuffer;
   }
 
   Histogram hist{};
 
   int32_t coordIndex = 0;
-  startOfScope = DWT_GetCycles();
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
-    process_stride_in_patches(
+    startOfScope = DWT_GetCycles();
+    processStrideInPatches(
         currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
         prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), hist, payload,
         coordIndex);
+    durationOfScope = DWT_GetCycles() - startOfScope;
+    sumOfScope += durationOfScope;
   }
-  durationOfScope = DWT_GetCycles() - startOfScope;
-  sumOfScope += durationOfScope;
 
   HistogramUV histUV = findMax(hist);
 
   // // correcting for roll and pitch
-  // float uRot = -packetHeader.w_y * packetHeader.fx;
-  // float vRot = packetHeader.w_x * packetHeader.fy;
+  // float uRot = -packetHeader.wy * packetHeader.fx;
+  // float vRot = packetHeader.wx * packetHeader.fy;
 
   // histUV.u -= uRot;
   // histUV.v -= vRot;
@@ -305,8 +318,7 @@ extern "C" void estimate_optical_flow(Payload *payload,
                                (packetHeader.fy * packetHeader.dt),
                            -10.F, 10.F);
 
-  // Kalman filter: state = [vx, vy, ax, ay]; acceleration modeled, no IMU input
-  // Init: {vx, vy, ax, ay, P00, P02, P22, P11, P13, P33, Qv, Qa}
+  // {vx, vy, ax, ay, P00, P02, P22, P11, P13, P33, Qv, Qa}
   static LinearKalmanFilter lkf = {0.F, 0.F, 0.F, 0.F, 1.F,   0.F,
                                    1.F, 1.F, 0.F, 1.F, 0.05F, 0.1F};
 
@@ -326,7 +338,7 @@ extern "C" void estimate_optical_flow(Payload *payload,
 
   uint32_t elapsedCycles = DWT_GetCycles() - startCycles;
   payload->metadata.elapsedStrideTimeMs =
-      (sumOfScope) / (HAL_RCC_GetHCLKFreq() / 1000U);
+      (sumOfScope / NUMBER_OF_STRIDES) / (HAL_RCC_GetHCLKFreq() / 1000U);
   sumOfScope = 0;
   payload->metadata.elapsedTotalTimeMs =
       elapsedCycles / (HAL_RCC_GetHCLKFreq() / 1000U);

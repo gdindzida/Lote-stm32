@@ -1,16 +1,12 @@
 #include "usb/usbd_cdc_if.h"
 #include "app/app_types.h"
+#include "app/shared_memory.h"
 #include "usbd_cdc.h"
 #include "usbd_def.h"
 #include <stdint.h>
 
 // extern
 extern USBD_HandleTypeDef hUsbDeviceFS;
-extern volatile WorkPackageType currentWorkType;
-extern uint8_t rxBuffer[APP_RX_DATA_SIZE];
-extern uint8_t txBuffer[APP_TX_DATA_SIZE];
-extern volatile uint32_t rxBufferOffset;
-extern volatile RecvPacketHeader currentPacketHeader;
 
 // local
 typedef enum { RX_WAIT_FOR_MAGIC, RX_RECEIVING_DATA } RxStateType;
@@ -32,8 +28,8 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS = {CDC_Init_FS, CDC_DeInit_FS,
  * @retval USBD_OK if all operations are OK else USBD_FAIL
  */
 static int8_t CDC_Init_FS(void) {
-  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, txBuffer, 0);
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rxBuffer);
+  USBD_CDC_SetTxBuffer(&hUsbDeviceFS, g_txBuffer, 0);
+  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, g_rxBuffer);
   return USBD_OK;
 }
 
@@ -135,16 +131,16 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
 
   case RX_WAIT_FOR_MAGIC: {
     RecvPacketHeader *receivedHeader =
-        (RecvPacketHeader *)(rxBuffer + rxBufferOffset);
+        (RecvPacketHeader *)(g_rxBuffer + g_rxBufferOffset);
     if (receivedHeader->magic == MAGIC) {
       rxBytesReceived = 0;
       rxState = RX_RECEIVING_DATA;
-      currentPacketHeader = *receivedHeader;
+      g_currentPacketHeader = *receivedHeader;
     }
 
     /* Always reset RX pointer to start of slot so magic bytes are
      * overwritten by the first image data packet. */
-    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rxBuffer + rxBufferOffset);
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, g_rxBuffer + g_rxBufferOffset);
     break;
   }
 
@@ -155,14 +151,15 @@ static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len) {
       rxBytesReceived = 0;
       rxState = RX_WAIT_FOR_MAGIC;
 
-      if (rxBufferOffset == 0) {
-        currentWorkType = PROCESS_RX_1;
+      if (g_rxBufferOffset == 0) {
+        g_currentWorkType = PROCESS_RX_1;
       } else {
-        currentWorkType = PROCESS_RX_2;
+        g_currentWorkType = PROCESS_RX_2;
       }
 
-      rxBufferOffset = (rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
-      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, rxBuffer + rxBufferOffset);
+      g_rxBufferOffset =
+          (g_rxBufferOffset + APP_RX_BUFFER_SIZE) % APP_RX_DATA_SIZE;
+      USBD_CDC_SetRxBuffer(&hUsbDeviceFS, g_rxBuffer + g_rxBufferOffset);
     } else {
       USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf + *Len);
     }
