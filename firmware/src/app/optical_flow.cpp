@@ -3,7 +3,6 @@
 #include "app/image.h"
 #include "app/shared_memory.h"
 #include "bsp/dwt.h"
-#include "stm32g431xx.h"
 #include "system/sysmem.h"
 #include "usbd_def.h"
 #include <algorithm>
@@ -11,8 +10,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <stdalign.h>
-#include <string.h>
 
 namespace {
 
@@ -234,7 +231,7 @@ void predict(LinearKalmanFilter &lkf, float dt) {
   lkf.P33 = P33y_new;
 }
 
-void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
+bool update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
             float quality) {
   quality = std::clamp(quality, 0.0F, 1.0F);
 
@@ -242,6 +239,14 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
 
   float invX = vx_meas - lkf.vx;
   float invY = vy_meas - lkf.vy;
+
+  // Gate
+  float innovation = __builtin_sqrtf((invX * invX) + (invY * invY));
+  float S = __builtin_sqrtf(lkf.P00 + lkf.P11) + R;
+  float sigmaThreshold = S;
+  if (innovation >= 0.5 * sigmaThreshold) {
+    return false;
+  }
 
   float Sx = lkf.P00 + R;
   float Sy = lkf.P11 + R;
@@ -266,6 +271,8 @@ void update(LinearKalmanFilter &lkf, float vx_meas, float vy_meas,
   lkf.P33 -= Ka_y * P13y_old;
   lkf.P11 *= (1.0F - Kv_y);
   lkf.P13 *= (1.0F - Kv_y);
+
+  return true;
 }
 
 } // namespace
@@ -323,14 +330,14 @@ extern "C" void estimateOpticalFlow(Payload *payload,
                                    1.F, 1.F, 0.F, 1.F, 0.05F, 0.1F};
 
   predict(lkf, packetHeader.dt);
-  update(lkf, vxRaw, vyRaw, histUV.quality);
+  bool success = update(lkf, vxRaw, vyRaw, histUV.quality);
   vxFilt = lkf.vx;
   vyFilt = lkf.vy;
 
   payload->metadata.numPoints = histUV.N;
   payload->metadata.vx = vxFilt;
   payload->metadata.vy = vyFilt;
-  payload->metadata.debug = histUV.quality;
+  payload->metadata.debug = success ? histUV.quality : 0.F;
 
   payload->header.length =
       sizeof(Metadata) +
