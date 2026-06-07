@@ -8,8 +8,15 @@ that data and computes summary metrics.
 
 Metrics reported (per axis)
 ---------------------------
-MAE   Mean Absolute Error
-RMSE  Root Mean Square Error
+MAE    Mean Absolute Error
+RMSE   Root Mean Square Error
+MAPE   Mean Absolute Percentage Error (percentage error vs. the reference/real value)
+
+Comparisons reported
+--------------------
+Predicted vs OpenCV    STM32 prediction compared to OpenCV Farneback optical-flow
+Predicted vs GT        STM32 prediction compared to position-derived ground truth
+OpenCV vs GT           OpenCV Farneback compared to position-derived ground truth
 """
 
 from __future__ import annotations
@@ -133,24 +140,52 @@ def compute_and_print_kpi(
             print("  All ground-truth velocities are NaN — skipping KPI.")
             return
 
-        vx_mae = float(np.mean(np.abs(vx_pred[valid_mask] - vx_opencv[valid_mask])))
-        vy_mae = float(np.mean(np.abs(vy_pred[valid_mask] - vy_opencv[valid_mask])))
-        # omega_mae = float(
-        #     np.mean(np.abs(omega_pred[valid_mask] - omega_gt[valid_mask]))
-        # )
+        def _mape(predicted: np.ndarray, reference: np.ndarray) -> float:
+            """Mean Absolute Percentage Error.
 
-        vx_rmse = float(
-            np.sqrt(np.mean((vx_pred[valid_mask] - vx_opencv[valid_mask]) ** 2))
-        )
-        vy_rmse = float(
-            np.sqrt(np.mean((vy_pred[valid_mask] - vy_opencv[valid_mask]) ** 2))
-        )
-        # omega_rmse = float(
-        #     np.sqrt(np.mean((omega_pred[valid_mask] - omega_gt[valid_mask]) ** 2))
-        # )
+            Frames where the reference velocity is zero (or very close to zero)
+            are excluded from the percentage calculation to avoid division by
+            zero producing meaningless infinity values.
+            """
+            nonzero = np.abs(reference) > 1e-9
+            if not nonzero.any():
+                return float("nan")
+            return float(
+                np.mean(np.abs(predicted[nonzero] - reference[nonzero]) / np.abs(reference[nonzero])) * 100.0
+            )
 
-        print(f"  Velocity MAE  — vx: {vx_mae:.4f} m/s,  vy: {vy_mae:.4f} m/s")
-        print(f"  Velocity RMSE — vx: {vx_rmse:.4f} m/s,  vy: {vy_rmse:.4f} m/s")
+        def _mae(a: np.ndarray, b: np.ndarray) -> float:
+            return float(np.mean(np.abs(a - b)))
+
+        def _rmse(a: np.ndarray, b: np.ndarray) -> float:
+            return float(np.sqrt(np.mean((a - b) ** 2)))
+
+        def _print_metrics(label: str, ref_label: str,
+                           vx_a: np.ndarray, vx_b: np.ndarray,
+                           vy_a: np.ndarray, vy_b: np.ndarray,
+                           mask: np.ndarray) -> None:
+            """Print MAE, RMSE and MAPE for a pair of velocity signals."""
+            vxa, vxb = vx_a[mask], vx_b[mask]
+            vya, vyb = vy_a[mask], vy_b[mask]
+            print(f"\n  ── {label} vs {ref_label} ──")
+            print(f"  MAE   vx: {_mae(vxa, vxb):.4f} m/s   vy: {_mae(vya, vyb):.4f} m/s")
+            print(f"  RMSE  vx: {_rmse(vxa, vxb):.4f} m/s   vy: {_rmse(vya, vyb):.4f} m/s")
+            mape_vx = _mape(vxa, vxb)
+            mape_vy = _mape(vya, vyb)
+            vx_str = f"{mape_vx:.2f} %" if not np.isnan(mape_vx) else "N/A (ref≈0)"
+            vy_str = f"{mape_vy:.2f} %" if not np.isnan(mape_vy) else "N/A (ref≈0)"
+            print(f"  MAPE  vx: {vx_str}   vy: {vy_str}")
+
+        # Also apply a GT-validity mask (non-zero dt and focal lengths were used)
+        valid_gt_mask = valid_mask & (
+            np.array([fr.dt for fr in frame_reads]) != 0
+        )
+
+        _print_metrics("Predicted", "OpenCV", vx_pred, vx_opencv, vy_pred, vy_opencv, valid_mask)
+
+        _print_metrics("Predicted", "GT", vx_pred, vx_pos, vy_pred, vy_pos, valid_gt_mask)
+
+        _print_metrics("OpenCV", "GT", vx_opencv, vx_pos, vy_opencv, vy_pos, valid_gt_mask)
 
         if plot_kpi:
             print(f"Plotting velocities!")
