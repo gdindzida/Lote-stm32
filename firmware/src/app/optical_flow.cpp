@@ -14,9 +14,7 @@
 namespace {
 
 // debug measuring
-volatile uint32_t startOfScope;
-volatile uint32_t durationOfScope;
-volatile uint32_t sumOfScope = 0;
+uint32_t numberOfSadBlocks = 0;
 
 constexpr std::array<Coordinate, (SEARCH_SIZE * 2 + 1) * (SEARCH_SIZE * 2 + 1)>
 makeSearchIndices() {
@@ -66,6 +64,7 @@ void processPatch(const uint8_t *currImgPatch, const uint8_t *prevImgPatch,
 
     uint32_t sad = 0;
     bool goodCandidate = true;
+    numberOfSadBlocks++;
 #pragma GCC unroll 8
     for (int row = 0; row < SAD_BLOCK_SIZE; ++row) {
       uint32_t candidateIndex =
@@ -352,15 +351,13 @@ extern "C" void estimateOpticalFlow(Payload *payload,
 
   Histogram hist{};
 
+  numberOfSadBlocks = 0;
   int32_t coordIndex = 0;
   for (int strideIndex = 0; strideIndex < NUMBER_OF_STRIDES; strideIndex++) {
-    startOfScope = DWT_GetCycles();
     processStrideInPatches(
         currbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex),
         prevbufferView + (IMG_W * SAD_BLOCK_SIZE * strideIndex), payload,
         coordIndex);
-    durationOfScope = DWT_GetCycles() - startOfScope;
-    sumOfScope += durationOfScope;
   }
 
   float yawRate = estimateFlowYawRate(payload);
@@ -395,16 +392,16 @@ extern "C" void estimateOpticalFlow(Payload *payload,
   payload->metadata.numPoints = histUV.N;
   payload->metadata.vx = vxFilt;
   payload->metadata.vy = vyFilt;
-  payload->metadata.debug = success ? histUV.quality : 0.F;
+  payload->metadata.debug =
+      static_cast<float>(numberOfSadBlocks); // success ? histUV.quality :
+                                             // 0.F;
 
   payload->header.length =
       sizeof(Metadata) +
       (NUMBER_OF_STRIDES * NUMBER_OF_BLOCKS_PER_STRIDE * sizeof(Coordinate));
 
   uint32_t elapsedCycles = DWT_GetCycles() - startCycles;
-  payload->metadata.elapsedStrideTimeMs =
-      (sumOfScope / NUMBER_OF_STRIDES) / (HAL_RCC_GetHCLKFreq() / 1000U);
-  sumOfScope = 0;
+  payload->metadata.elapsedStrideTimeMs = numberOfSadBlocks;
   payload->metadata.elapsedTotalTimeMs =
       elapsedCycles / (HAL_RCC_GetHCLKFreq() / 1000U);
 

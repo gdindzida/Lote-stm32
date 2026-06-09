@@ -6,6 +6,7 @@
 #include "bsp/gpio.h"
 #include "cmsis_gcc.h"
 #include "stm32g4xx_hal.h"
+#include "stm32g4xx_hal_flash.h"
 #include "system/sysmem.h"
 #include "usb/usb_device.h"
 #include "usb/usbd_cdc_if.h"
@@ -23,6 +24,11 @@ volatile RecvPacketHeader g_currentPacketHeader = {0};
 int main(void) {
   Stack_Paint();
   HAL_Init();
+
+  __HAL_FLASH_PREFETCH_BUFFER_ENABLE();
+  __HAL_FLASH_INSTRUCTION_CACHE_ENABLE();
+  __HAL_FLASH_DATA_CACHE_ENABLE();
+
   SystemClock_Config();
   MX_GPIO_Init();
   MX_DMA_Init();
